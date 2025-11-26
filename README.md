@@ -2,7 +2,7 @@
 
 ![KnoxHost Logo](assets/logo.png)
 
-**KnoxHost** is a modern, tactical server management tool for *Project Zomboid*. Built with Electron and React, it provides a streamlined interface for deploying, configuring, and managing your dedicated servers.
+**KnoxHost** is a modern, server management tool for *Project Zomboid*. Built with Electron and React, it provides a streamlined interface for deploying, configuring, and managing your dedicated servers.
 
 ## Features
 
