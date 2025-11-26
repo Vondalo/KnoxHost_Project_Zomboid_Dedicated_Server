@@ -35,6 +35,12 @@ When hosting via standard methods, SteamCMD forces a full redownload and verific
 -   **IPC Bridge**: Secure communication layer between frontend and backend.
 -   **SQLite**: Local database for managing server whitelists.
 
+## Installation
+
+1.  Go to the **Releases** page.
+2.  Download the latest `setup.exe`.
+3.  Run the installer.
+
 ## Getting Started
 
 ### Prerequisites
@@ -43,7 +49,7 @@ When hosting via standard methods, SteamCMD forces a full redownload and verific
 -   Node.js (v16+)
 -   Steam Account, no login in KnoxHost required (for Workshop content and SteamCMD)
 
-### Installation
+### Developer Setup
 
 1.  Clone the repository:
     ```bash
