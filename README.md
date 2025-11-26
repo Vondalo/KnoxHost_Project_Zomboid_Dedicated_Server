@@ -42,6 +42,7 @@ When hosting via standard methods, SteamCMD forces a full redownload and verific
 1.  Go to the **Releases** page.
 2.  Download the latest `setup exe file`.
 3.  Run the installer.
+4.  Or if you are paranoid, read the source code and build the exe yourself as shown below :3
 
 ## Getting Started
 
