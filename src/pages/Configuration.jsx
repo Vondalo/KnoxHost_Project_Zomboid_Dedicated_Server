@@ -9,7 +9,7 @@ const Configuration = () => {
     const [configs, setConfigs] = useState([]);
     const [selectedConfig, setSelectedConfig] = useState(() => localStorage.getItem('lastSelectedConfig') || 'servertest');
     const [data, setData] = useState({ config: {}, sandbox: {}, spawnregions: '', zombies: {}, metadata: { memory: { min: '4', max: '4' } } });
-    const [loading, setLoading] = useState(false);
+    const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [activeTab, setActiveTab] = useState('general');
 
@@ -670,7 +670,7 @@ const Configuration = () => {
                                         return (
                                             <div key={id} className="flex items-center gap-4 bg-background p-3 border border-border rounded-md hover:border-primary/50 transition-colors group">
                                                 {mod?.preview ? (
-                                                    <img src={`file://${mod.preview}`} alt={mod.title} className="w-10 h-10 object-cover rounded border border-border" />
+                                                    <img src={mod.preview?.startsWith('http') ? mod.preview : `media://${mod.preview}`} alt={mod.title} className="w-10 h-10 object-cover rounded border border-border" />
                                                 ) : (
                                                     <div className="w-10 h-10 bg-surface border border-border rounded flex items-center justify-center text-text-muted">
                                                         <Box size={20} />

@@ -216,19 +216,64 @@ async function parseModFromPath(modPath, workshopId, source) {
         }
     }
 
-    if (modItems.length > 0) {
-        const previewPath = path.join(modPath, 'preview.png');
-        const hasPreview = await exists(previewPath);
+    return {
+        workshopId: workshopId,
+        title: modItems[0].name, // Use first mod name as title
+        mods: modItems,
+        preview: null, // Will be populated via Steam API
+        location: source
+    };
+}
 
-        return {
-            workshopId: workshopId,
-            title: modItems[0].name, // Use first mod name as title
-            mods: modItems,
-            preview: hasPreview ? previewPath : null,
-            location: source
+
+async function getPublishedFileDetails(ids) {
+    if (!ids || ids.length === 0) return {};
+
+    return new Promise((resolve, reject) => {
+        const postData = new URLSearchParams();
+        postData.append('itemcount', ids.length);
+        ids.forEach((id, index) => {
+            postData.append(`publishedfileids[${index}]`, id);
+        });
+
+        const options = {
+            hostname: 'api.steampowered.com',
+            path: '/ISteamRemoteStorage/GetPublishedFileDetails/v1/',
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Content-Length': Buffer.byteLength(postData.toString())
+            }
         };
-    }
-    return null;
+
+        const req = https.request(options, (res) => {
+            let data = '';
+            res.on('data', (chunk) => data += chunk);
+            res.on('end', () => {
+                try {
+                    const json = JSON.parse(data);
+                    const map = {};
+                    if (json.response && json.response.publishedfiledetails) {
+                        json.response.publishedfiledetails.forEach(item => {
+                            map[item.publishedfileid] = item.preview_url;
+                        });
+                    }
+                    resolve(map);
+                } catch (err) {
+                    console.error('Error parsing Steam API response:', err);
+                    resolve({});
+                }
+            });
+        });
+
+        req.on('error', (e) => {
+            console.error('Steam API request failed:', e);
+            resolve({});
+        });
+
+        req.write(postData.toString());
+        req.end();
+    });
 }
 
 export async function getInstalledMods() {
@@ -264,6 +309,21 @@ export async function getInstalledMods() {
             const results = await Promise.all(modPromises);
             mods.push(...results.filter(m => m !== null));
         }
+    }
+
+    // Batch fetch images from Steam API
+    const workshopIds = mods.map(m => m.workshopId);
+    // Fetch in chunks of 50 to be safe
+    const chunkSize = 50;
+    for (let i = 0; i < workshopIds.length; i += chunkSize) {
+        const chunk = workshopIds.slice(i, i + chunkSize);
+        const images = await getPublishedFileDetails(chunk);
+
+        mods.forEach(mod => {
+            if (images[mod.workshopId]) {
+                mod.preview = images[mod.workshopId];
+            }
+        });
     }
 
     return mods;

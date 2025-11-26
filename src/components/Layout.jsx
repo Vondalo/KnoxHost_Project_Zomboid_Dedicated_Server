@@ -1,28 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Outlet, NavLink, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Settings, Package, Users, X, Minimize2, Maximize2, Menu } from 'lucide-react';
+import { Outlet, NavLink, useLocation, useOutlet } from 'react-router-dom';
+import { LayoutDashboard, Settings, Package, Users, Menu } from 'lucide-react';
 import { motion, AnimatePresence, useMotionValue, useTransform, animate } from 'framer-motion';
 import CustomCursor from './CustomCursor';
 
 const Layout = () => {
     const location = useLocation();
-    const [isMaximized, setIsMaximized] = useState(false);
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-
-    const handleMinimize = () => {
-        if (window.electronAPI) window.electronAPI.minimizeWindow();
-    };
-
-    const handleMaximize = () => {
-        if (window.electronAPI) {
-            window.electronAPI.maximizeWindow();
-            setIsMaximized(!isMaximized);
-        }
-    };
-
-    const handleClose = () => {
-        if (window.electronAPI) window.electronAPI.closeWindow();
-    };
+    const currentOutlet = useOutlet();
 
     return (
         <div className="flex h-screen bg-transparent text-text font-sans overflow-hidden selection:bg-primary/30 selection:text-white">
@@ -69,21 +54,23 @@ const Layout = () => {
                 {/* Title Bar */}
                 <header className="h-12 bg-surface/30 backdrop-blur-md border-b border-border flex items-center justify-between px-4 shrink-0 drag-region">
                     <div className="text-xs text-text-muted font-mono uppercase tracking-wider">
-                        {location.pathname === '/' ? 'Mission Control' : location.pathname.slice(1).replace('-', ' ')}
-                    </div>
-                    <div className="flex items-center gap-2 no-drag">
-                        <WindowControl onClick={handleMinimize} icon={<Minimize2 size={14} />} />
-                        <WindowControl onClick={handleMaximize} icon={<Maximize2 size={14} />} />
-                        <WindowControl onClick={handleClose} icon={<X size={14} />} isClose />
+                        {location.pathname === '/' ? 'Dashboard' : location.pathname.slice(1).replace('-', ' ')}
                     </div>
                 </header>
 
                 {/* Page Content */}
                 <main className="flex-1 overflow-auto p-6 relative">
                     <AnimatePresence mode="wait">
-                        <PageTransition key={location.pathname}>
-                            <Outlet />
-                        </PageTransition>
+                        <motion.div
+                            key={location.pathname}
+                            initial={{ opacity: 0, y: 10, scale: 0.98 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: -10, scale: 0.98 }}
+                            transition={{ duration: 0.2, ease: "easeOut" }}
+                            className="h-full"
+                        >
+                            {currentOutlet}
+                        </motion.div>
                     </AnimatePresence>
                 </main>
             </div>
@@ -112,33 +99,6 @@ const NavItem = ({ to, icon, label, isOpen }) => (
             </div>
         )}
     </NavLink>
-);
-
-const WindowControl = ({ onClick, icon, isClose }) => (
-    <button
-        onClick={onClick}
-        className={`
-            w-8 h-8 flex items-center justify-center rounded-md transition-colors
-            ${isClose
-                ? 'hover:bg-error hover:text-white text-text-muted'
-                : 'hover:bg-surface-hover text-text-muted hover:text-text'
-            }
-        `}
-    >
-        {icon}
-    </button>
-);
-
-const PageTransition = ({ children }) => (
-    <motion.div
-        initial={{ opacity: 0, y: 10, scale: 0.98 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        exit={{ opacity: 0, y: -10, scale: 0.98 }}
-        transition={{ duration: 0.2, ease: "easeOut" }}
-        className="h-full"
-    >
-        {children}
-    </motion.div>
 );
 
 const InteractiveBackground = () => {

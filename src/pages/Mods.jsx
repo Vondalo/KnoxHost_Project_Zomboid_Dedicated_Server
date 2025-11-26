@@ -175,7 +175,7 @@ const Mods = () => {
                                             <div className="aspect-video bg-black/20 relative overflow-hidden border-b border-border">
                                                 {mod.preview ? (
                                                     <img
-                                                        src={`file://${mod.preview}`}
+                                                        src={mod.preview?.startsWith('http') ? mod.preview : `media://${mod.preview}`}
                                                         alt={mod.title}
                                                         className={clsx(
                                                             "w-full h-full object-cover transition-all duration-500",

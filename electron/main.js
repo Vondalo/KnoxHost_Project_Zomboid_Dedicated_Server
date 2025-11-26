@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, Notification } from 'electron';
+import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, Notification, protocol } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { ensureSteamCMD, installServer } from './handlers/steamcmd.js';
@@ -13,6 +13,11 @@ const __dirname = path.dirname(__filename);
 
 let tray = null;
 let isQuitting = false;
+
+// Register scheme as privileged
+protocol.registerSchemesAsPrivileged([
+    { scheme: 'media', privileges: { secure: true, supportFetchAPI: true, bypassCSP: true, standard: true } }
+]);
 
 function createWindow() {
     const win = new BrowserWindow({
@@ -168,6 +173,19 @@ app.whenReady().then(() => {
     ipcMain.handle('settings:get', getSettings);
     ipcMain.handle('settings:save', (_, settings) => saveSettings(settings));
 
+});
+
+// Register custom protocol for local media
+app.whenReady().then(() => {
+    const { protocol } = require('electron');
+    protocol.registerFileProtocol('media', (request, callback) => {
+        const url = request.url.replace('media://', '');
+        try {
+            return callback(decodeURIComponent(url));
+        } catch (error) {
+            console.error(error);
+        }
+    });
 });
 
 app.on('window-all-closed', () => {
