@@ -1,0 +1,86 @@
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* Fallback for Tailwind v4 theme issues */
+:root {
+  --color-background: #09090b;
+  --color-surface: #18181b;
+  --color-surface-hover: #27272a;
+  --color-border: #27272a;
+
+  --color-primary: #f43f5e;
+  --color-primary-hover: #e11d48;
+
+  --color-text: #fafafa;
+  --color-text-muted: #a1a1aa;
+  --color-text-dim: #52525b;
+
+  --color-success: #10b981;
+  --color-warning: #f59e0b;
+  --color-error: #ef4444;
+
+  --font-sans: "Inter", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+}
+
+@theme {
+  --color-background: #09090b;
+  --color-surface: #18181b;
+  --color-surface-hover: #27272a;
+  --color-border: #27272a;
+  --color-primary: #f43f5e;
+  --color-primary-hover: #e11d48;
+  --color-text: #fafafa;
+  --color-text-muted: #a1a1aa;
+  --color-text-dim: #52525b;
+  --color-success: #10b981;
+  --color-warning: #f59e0b;
+  --color-error: #ef4444;
+  --font-sans: "Inter", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+  --shadow-glow: 0 0 20px -5px rgba(244, 63, 94, 0.3);
+}
+
+@layer base {
+
+  body,
+  html,
+  * {
+    cursor: none !important;
+  }
+
+  body {
+    background-color: #09090b;
+    /* Hardcoded fallback */
+    color: #fafafa;
+    /* Hardcoded fallback */
+    font-family: "Inter", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::selection {
+    background-color: rgba(244, 63, 94, 0.3);
+    color: #f43f5e;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background-color: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background-color: #27272a;
+    border-radius: 9999px;
+    transition: background-color 150ms;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(244, 63, 94, 0.5);
+    /* primary/50 */
+  }
+}
