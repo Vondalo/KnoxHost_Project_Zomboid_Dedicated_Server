@@ -2,6 +2,8 @@
 
 ![KnoxHost Logo](assets/logo.png)
 
+[![Discord](https://img.shields.io/badge/Discord-Join%20Us-7289da?style=for-the-badge&logo=discord)](https://discord.gg/Qzamd6dQzK)
+
 **KnoxHost** is a modern, server management tool for *Project Zomboid*. Built with Electron and React, it provides a streamlined interface for deploying, configuring, and managing your dedicated servers.
 
 
@@ -38,7 +40,7 @@ When hosting via standard methods, SteamCMD forces a full redownload and verific
 ## Installation
 
 1.  Go to the **Releases** page.
-2.  Download the latest `setup.exe`.
+2.  Download the latest `setup exe file`.
 3.  Run the installer.
 
 ## Getting Started
