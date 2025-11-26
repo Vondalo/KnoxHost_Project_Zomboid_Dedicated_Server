@@ -177,7 +177,7 @@ app.whenReady().then(() => {
 
 // Register custom protocol for local media
 app.whenReady().then(() => {
-    const { protocol } = require('electron');
+
     protocol.registerFileProtocol('media', (request, callback) => {
         const url = request.url.replace('media://', '');
         try {
