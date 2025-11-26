@@ -7,8 +7,25 @@
   "scripts": {
     "dev": "concurrently \"vite\" \"wait-on tcp:5173 && electron .\"",
     "build": "vite build",
+    "build:win": "vite build && electron-builder --win",
     "lint": "eslint .",
     "preview": "vite preview"
+  },
+  "build": {
+    "appId": "com.knoxhost.app",
+    "productName": "KnoxHost",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/logo.png"
+    }
   },
   "dependencies": {
     "better-sqlite3": "^12.4.6",
@@ -30,6 +47,7 @@
     "autoprefixer": "^10.4.22",
     "concurrently": "^9.2.1",
     "electron": "^39.2.3",
+    "electron-builder": "^26.0.12",
     "eslint": "^8.57.0",
     "eslint-plugin-react": "^7.34.1",
     "eslint-plugin-react-hooks": "^4.6.0",

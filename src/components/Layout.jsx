@@ -51,6 +51,7 @@ const Layout = () => {
                     <NavItem to="/config" icon={<Settings size={20} />} label="Configuration" isOpen={isSidebarOpen} />
                     <NavItem to="/mods" icon={<Package size={20} />} label="Mods Manager" isOpen={isSidebarOpen} />
                     <NavItem to="/whitelist" icon={<Users size={20} />} label="Whitelist" isOpen={isSidebarOpen} />
+                    <NavItem to="/settings" icon={<Settings size={20} />} label="Settings" isOpen={isSidebarOpen} />
                 </nav>
 
                 <div className="p-4 border-t border-border shrink-0">

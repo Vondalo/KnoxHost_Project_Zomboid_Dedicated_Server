@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, Notification } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { ensureSteamCMD, installServer } from './handlers/steamcmd.js';
@@ -6,9 +6,13 @@ import { getConfigs, readConfig, saveConfig, deleteConfig, openConfigFile, revea
 import { startServer, stopServer, getMemorySettings, setMemorySettings, getServerStatus, getServerLogs, openSavesFolder, backupSaves, startBackupSchedule, stopBackupSchedule, startRestartSchedule, stopRestartSchedule } from './handlers/server.js';
 import { getInstalledMods, addModToServer, removeModFromServer, searchSteamWorkshop, installMod, deleteMod, copyModsFromClient } from './handlers/mods.js';
 import { getWhitelist, addToWhitelist, removeFromWhitelist } from './handlers/whitelist.js';
+import { getSettings, saveSettings } from './handlers/settings.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+let tray = null;
+let isQuitting = false;
 
 function createWindow() {
     const win = new BrowserWindow({
@@ -30,6 +34,62 @@ function createWindow() {
     } else {
         win.loadFile(path.join(__dirname, '../dist/index.html'));
     }
+
+    win.on('close', (event) => {
+        if (!isQuitting) {
+            event.preventDefault();
+            win.hide();
+            new Notification({
+                title: 'KnoxHost',
+                body: 'KnoxHost is running in the background.',
+                icon: path.join(__dirname, '../assets/logo.png')
+            }).show();
+            return false;
+        }
+    });
+
+    createTray(win);
+}
+
+function createTray(win) {
+    const iconPath = path.join(__dirname, '../assets/logo.png');
+    const icon = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 });
+    tray = new Tray(icon);
+
+    const updateContextMenu = () => {
+        const isRunning = getServerStatus();
+        const statusText = isRunning ? 'Server: Running' : 'Server: Stopped';
+
+        const contextMenu = Menu.buildFromTemplate([
+            { label: statusText, enabled: false },
+            { type: 'separator' },
+            {
+                label: 'Show App',
+                click: () => {
+                    win.show();
+                }
+            },
+            {
+                label: 'Quit',
+                click: () => {
+                    isQuitting = true;
+                    app.quit();
+                }
+            }
+        ]);
+
+        tray.setToolTip(`KnoxHost - ${statusText}`);
+        tray.setContextMenu(contextMenu);
+    };
+
+    updateContextMenu();
+
+    // Poll server status every 5 seconds
+    setInterval(updateContextMenu, 5000);
+
+    tray.on('click', () => {
+        win.show();
+    });
 }
 
 app.whenReady().then(() => {
@@ -104,6 +164,9 @@ app.whenReady().then(() => {
     ipcMain.handle('whitelist:get', (_, serverName) => getWhitelist(serverName));
     ipcMain.handle('whitelist:add', (_, serverName, username, password, isAdmin) => addToWhitelist(serverName, username, password, isAdmin));
     ipcMain.handle('whitelist:remove', (_, serverName, username) => removeFromWhitelist(serverName, username));
+
+    ipcMain.handle('settings:get', getSettings);
+    ipcMain.handle('settings:save', (_, settings) => saveSettings(settings));
 
 });
 

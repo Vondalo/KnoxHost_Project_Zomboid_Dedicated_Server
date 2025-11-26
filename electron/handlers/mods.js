@@ -6,6 +6,7 @@ import { exec } from 'child_process';
 import util from 'util';
 import { readConfig, saveConfig } from './config.js';
 import { installWorkshopItem } from './steamcmd.js';
+import { getSettings } from './settings.js';
 import https from 'https';
 
 const execPromise = util.promisify(exec);
@@ -61,8 +62,14 @@ async function getSteamLibraryFolders() {
 
     // Try defaults
     if (!steamPath) {
-        if (await exists(DEFAULT_STEAM_PATH_X86)) steamPath = DEFAULT_STEAM_PATH_X86;
-        else if (await exists(DEFAULT_STEAM_PATH_X64)) steamPath = DEFAULT_STEAM_PATH_X64;
+        const settings = await getSettings();
+        if (settings.steamInstallPath && await exists(settings.steamInstallPath)) {
+            steamPath = settings.steamInstallPath;
+        } else if (await exists(DEFAULT_STEAM_PATH_X86)) {
+            steamPath = DEFAULT_STEAM_PATH_X86;
+        } else if (await exists(DEFAULT_STEAM_PATH_X64)) {
+            steamPath = DEFAULT_STEAM_PATH_X64;
+        }
     }
 
     if (steamPath) {

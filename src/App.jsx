@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard';
 import Configuration from './pages/Configuration';
 import Mods from './pages/Mods';
 import Whitelist from './pages/Whitelist';
+import Settings from './pages/Settings';
 
 function App() {
   return (
@@ -15,6 +16,7 @@ function App() {
           <Route path="/config" element={<Configuration />} />
           <Route path="/mods" element={<Mods />} />
           <Route path="/whitelist" element={<Whitelist />} />
+          <Route path="/settings" element={<Settings />} />
           <Route path="*" element={<div className="p-10 text-white">404 - Page Not Found. Path: {window.location.hash}</div>} />
         </Route>
       </Routes>

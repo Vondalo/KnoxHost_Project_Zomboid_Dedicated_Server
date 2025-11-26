@@ -4,12 +4,31 @@ import { constants } from 'fs';
 import path from 'path';
 import ini from 'ini';
 import { app, shell } from 'electron';
+import { getSettings } from './settings.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const SERVER_DIR = path.join(app.getPath('userData'), 'server');
-const CONFIG_DIR = path.join(app.getPath('home'), 'Zomboid', 'Server');
+
+
+
+async function getConfigDir() {
+    const settings = await getSettings();
+    const basePath = settings.pzConfigPath || path.join(app.getPath('home'), 'Zomboid');
+    return path.join(basePath, 'Server');
+}
+
+async function getSavesDir() {
+    const settings = await getSettings();
+    const basePath = settings.pzConfigPath || path.join(app.getPath('home'), 'Zomboid');
+    return path.join(basePath, 'Saves', 'Multiplayer');
+}
+
+async function getDbDir() {
+    const settings = await getSettings();
+    const basePath = settings.pzConfigPath || path.join(app.getPath('home'), 'Zomboid');
+    return path.join(basePath, 'db');
+}
 
 // Helper for async file existence check
 async function exists(filePath) {
@@ -22,6 +41,7 @@ async function exists(filePath) {
 }
 
 export async function getConfigs() {
+    const CONFIG_DIR = await getConfigDir();
     if (!(await exists(CONFIG_DIR))) {
         return [];
     }
@@ -35,6 +55,7 @@ export async function getConfigs() {
 }
 
 export async function readConfig(serverName) {
+    const CONFIG_DIR = await getConfigDir();
     const iniPath = path.join(CONFIG_DIR, `${serverName}.ini`);
     const luaPath = path.join(CONFIG_DIR, `${serverName}_SandboxVars.lua`);
     const spawnPath = path.join(CONFIG_DIR, `${serverName}_spawnregions.lua`);
@@ -155,6 +176,7 @@ export async function readConfig(serverName) {
 }
 
 export async function saveConfig(serverName, data) {
+    const CONFIG_DIR = await getConfigDir();
     if (!(await exists(CONFIG_DIR))) {
         await fs.mkdir(CONFIG_DIR, { recursive: true });
     }
@@ -237,6 +259,7 @@ export async function saveConfig(serverName, data) {
 }
 
 export async function deleteConfig(serverName, deleteWorld = false) {
+    const CONFIG_DIR = await getConfigDir();
     const iniPath = path.join(CONFIG_DIR, `${serverName}.ini`);
     const luaPath = path.join(CONFIG_DIR, `${serverName}_SandboxVars.lua`);
     const spawnPath = path.join(CONFIG_DIR, `${serverName}_spawnregions.lua`);
@@ -251,8 +274,8 @@ export async function deleteConfig(serverName, deleteWorld = false) {
         if (await exists(jsonPath)) await fs.unlink(jsonPath);
 
         if (deleteWorld) {
-            const savesDir = path.join(app.getPath('home'), 'Zomboid', 'Saves', 'Multiplayer', serverName);
-            const dbPath = path.join(app.getPath('home'), 'Zomboid', 'db', `${serverName}.db`); // Note: DB location might vary, usually in db folder or saves
+            const savesDir = path.join(await getSavesDir(), serverName);
+            const dbPath = path.join(await getDbDir(), `${serverName}.db`); // Note: DB location might vary, usually in db folder or saves
 
             // Standard PZ Save Location: ~/Zomboid/Saves/Multiplayer/<ServerName>
             if (await exists(savesDir)) {
@@ -262,7 +285,7 @@ export async function deleteConfig(serverName, deleteWorld = false) {
             // Also check for the .db file which might be in Zomboid/db or Zomboid/Saves
             // Actually, for MP, the main world data is in the Saves/Multiplayer/<ServerName> folder (map_p.bin, etc.)
             // The player database is usually <ServerName>.db in Zomboid/db
-            const dbDir = path.join(app.getPath('home'), 'Zomboid', 'db');
+            const dbDir = await getDbDir();
             const dbFile = path.join(dbDir, `${serverName}.db`);
             if (await exists(dbFile)) {
                 await fs.unlink(dbFile);
@@ -277,6 +300,7 @@ export async function deleteConfig(serverName, deleteWorld = false) {
 }
 
 export async function openConfigFile(serverName) {
+    const CONFIG_DIR = await getConfigDir();
     const iniPath = path.join(CONFIG_DIR, `${serverName}.ini`);
     if (await exists(iniPath)) {
         await shell.openPath(iniPath);
@@ -286,6 +310,7 @@ export async function openConfigFile(serverName) {
 }
 
 export async function revealConfigFile(serverName) {
+    const CONFIG_DIR = await getConfigDir();
     const iniPath = path.join(CONFIG_DIR, `${serverName}.ini`);
     if (await exists(iniPath)) {
         shell.showItemInFolder(iniPath);
@@ -296,7 +321,8 @@ export async function revealConfigFile(serverName) {
 
 export async function installSophiePreset() {
     const sourceDir = path.join(__dirname, '../../resources/presets');
-    const destBase = path.join(app.getPath('home'), 'Zomboid');
+    const settings = await getSettings();
+    const destBase = settings.pzConfigPath || path.join(app.getPath('home'), 'Zomboid');
 
     try {
         if (!(await exists(sourceDir))) {
@@ -331,7 +357,7 @@ export async function installSophiePreset() {
 }
 
 export async function getSaves() {
-    const savesPath = path.join(app.getPath('home'), 'Zomboid', 'Saves', 'Multiplayer');
+    const savesPath = await getSavesDir();
     if (!(await exists(savesPath))) return [];
 
     try {
@@ -344,8 +370,8 @@ export async function getSaves() {
 }
 
 export async function deleteSave(saveName) {
-    const savePath = path.join(app.getPath('home'), 'Zomboid', 'Saves', 'Multiplayer', saveName);
-    const dbPath = path.join(app.getPath('home'), 'Zomboid', 'db', `${saveName}.db`);
+    const savePath = path.join(await getSavesDir(), saveName);
+    const dbPath = path.join(await getDbDir(), `${saveName}.db`);
 
     try {
         if (await exists(savePath)) {

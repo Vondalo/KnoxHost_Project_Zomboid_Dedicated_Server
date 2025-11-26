@@ -4,6 +4,17 @@
 
 **KnoxHost** is a modern, server management tool for *Project Zomboid*. Built with Electron and React, it provides a streamlined interface for deploying, configuring, and managing your dedicated servers.
 
+
+
+## Why KnoxHost?
+
+I  built KnoxHost to solve a specific issue I faced while trying to host a server for my friends: being stuck at initializing for years...
+
+When hosting via standard methods, SteamCMD forces a full redownload and verification of all workshop mods every time the server starts. For heavily modded servers, this causes the process to get stuck on "Initializing" for ages.
+
+**KnoxHost bypasses this bottleneck.** It lets you host a server with a press of a button while also skipping this mod reinstall problem that is in the base server.
+
+
 ## Features
 
 -   **🚀 One-Click Deployment**: Install and update the dedicated server via SteamCMD automatically.
@@ -54,6 +65,16 @@ To create a standalone executable:
 ```bash
 npm run build
 ```
+
+## Building the Application
+
+To build the Windows executable:
+
+```bash
+npm run build:win
+```
+
+The output executable will be located in the `dist-electron` directory.
 
 ## License
 

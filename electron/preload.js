@@ -44,5 +44,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
     getWhitelist: (serverName) => ipcRenderer.invoke('whitelist:get', serverName),
     addToWhitelist: (serverName, username, password, isAdmin) => ipcRenderer.invoke('whitelist:add', serverName, username, password, isAdmin),
+    addToWhitelist: (serverName, username, password, isAdmin) => ipcRenderer.invoke('whitelist:add', serverName, username, password, isAdmin),
     removeFromWhitelist: (serverName, username) => ipcRenderer.invoke('whitelist:remove', serverName, username),
+    getSettings: () => ipcRenderer.invoke('settings:get'),
+    saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
 });
