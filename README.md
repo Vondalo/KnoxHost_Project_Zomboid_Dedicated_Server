@@ -3,8 +3,8 @@
 ![KnoxHost Logo](assets/logo.png)
 
 <p align="center">
-  <img src="assets/dashboard.png" width="45%" />
-  <img src="assets/mod_page.png" width="45%" />
+  <img src="assets/dashboard.png" width="49%" />
+  <img src="assets/mod_page.png" width="49%" />
 </p>
 
 [![Discord](https://img.shields.io/badge/Discord-Join%20Us-7289da?style=for-the-badge&logo=discord)](https://discord.gg/Qzamd6dQzK)
