@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Users, UserPlus, Trash2, Shield, ShieldAlert, RefreshCw, Search } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import clsx from 'clsx';
+import { useToast } from '../context/ToastContext';
+import ConfirmationModal from '../components/ConfirmationModal';
 
 const Whitelist = () => {
     const [users, setUsers] = useState([]);
@@ -13,6 +16,9 @@ const Whitelist = () => {
     const [newUsername, setNewUsername] = useState('');
     const [newPassword, setNewPassword] = useState('');
     const [newIsAdmin, setNewIsAdmin] = useState(false);
+
+    const toast = useToast();
+    const [confirmation, setConfirmation] = useState({ isOpen: false, title: '', message: '', onConfirm: () => { }, confirmText: 'Confirm', confirmColor: 'bg-primary' });
 
     useEffect(() => {
         loadWhitelist();
@@ -28,6 +34,10 @@ const Whitelist = () => {
 
     const handleAddUser = async (e) => {
         e.preventDefault();
+        if (!newUsername.trim() || !newPassword.trim()) {
+            toast.error("Username and Password are required.");
+            return;
+        }
         if (!window.electronAPI) return;
 
         const result = await window.electronAPI.addToWhitelist(serverName, newUsername, newPassword, newIsAdmin);
@@ -37,21 +47,30 @@ const Whitelist = () => {
             setNewUsername('');
             setNewPassword('');
             setNewIsAdmin(false);
+            toast.success(`User ${newUsername} added to whitelist.`);
         } else {
-            alert(`Failed to add user: ${result.error}`);
+            toast.error(`Failed to add user: ${result.error}`);
         }
     };
 
     const handleRemoveUser = async (username) => {
-        if (!confirm(`Remove ${username} from whitelist?`)) return;
-        if (!window.electronAPI) return;
-
-        const result = await window.electronAPI.removeFromWhitelist(serverName, username);
-        if (result.success) {
-            loadWhitelist();
-        } else {
-            alert(`Failed to remove user: ${result.error}`);
-        }
+        setConfirmation({
+            isOpen: true,
+            title: 'Remove User?',
+            message: `Are you sure you want to remove ${username} from the whitelist?`,
+            confirmText: 'Remove',
+            confirmColor: 'bg-error',
+            onConfirm: async () => {
+                if (!window.electronAPI) return;
+                const result = await window.electronAPI.removeFromWhitelist(serverName, username);
+                if (result.success) {
+                    loadWhitelist();
+                    toast.success(`User ${username} removed.`);
+                } else {
+                    toast.error(`Failed to remove user: ${result.error}`);
+                }
+            }
+        });
     };
 
     const filteredUsers = users.filter(u => u.username.toLowerCase().includes(searchQuery.toLowerCase()));
@@ -213,13 +232,21 @@ const Whitelist = () => {
                     </div>
                 )}
             </AnimatePresence>
+
+            {/* Confirmation Modal */}
+            <ConfirmationModal
+                isOpen={confirmation.isOpen}
+                onClose={() => setConfirmation(prev => ({ ...prev, isOpen: false }))}
+                onConfirm={confirmation.onConfirm}
+                title={confirmation.title}
+                message={confirmation.message}
+                confirmText={confirmation.confirmText}
+                confirmColor={confirmation.confirmColor}
+            />
         </div>
     );
 };
 
-// Helper for clsx if not imported
-function clsx(...classes) {
-    return classes.filter(Boolean).join(' ');
-}
+
 
 export default Whitelist;

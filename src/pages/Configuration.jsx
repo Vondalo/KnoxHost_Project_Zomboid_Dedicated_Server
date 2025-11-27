@@ -3,6 +3,61 @@ import { Save, RefreshCw, Plus, Trash2, Search, Settings, X, FileText, FolderOpe
 import { PRESETS } from '../data/presets';
 import { motion, AnimatePresence } from 'framer-motion';
 import clsx from 'clsx';
+import { useToast } from '../context/ToastContext';
+import ConfirmationModal from '../components/ConfirmationModal';
+
+const ConfigField = ({ section, settingKey, value, onChange }) => {
+    const type = typeof value;
+
+    if (typeof settingKey === 'string' && settingKey.toLowerCase().includes('password')) {
+        return (
+            <input
+                type="password"
+                value={value}
+                onChange={(e) => onChange(section, settingKey, e.target.value)}
+                className="w-full bg-background border border-border rounded px-3 py-1.5 text-sm text-text focus:outline-none focus:ring-1 focus:ring-primary transition-all font-mono"
+            />
+        );
+    }
+
+    if (type === 'boolean') {
+        return (
+            <button
+                onClick={() => onChange(section, settingKey, !value)}
+                className={clsx(
+                    "w-10 h-5 rounded-full transition-colors relative focus:outline-none focus:ring-1 focus:ring-primary",
+                    value ? 'bg-primary' : 'bg-surface-hover'
+                )}
+            >
+                <motion.div
+                    className="absolute top-1 left-1 w-3 h-3 rounded-full bg-white"
+                    animate={{ x: value ? 20 : 0 }}
+                    transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                />
+            </button>
+        );
+    }
+
+    if (type === 'number') {
+        return (
+            <input
+                type="number"
+                value={value}
+                onChange={(e) => onChange(section, settingKey, parseFloat(e.target.value))}
+                className="w-full bg-background border border-border rounded px-3 py-1.5 text-sm text-text focus:outline-none focus:ring-1 focus:ring-primary transition-all font-mono"
+            />
+        );
+    }
+
+    return (
+        <input
+            type="text"
+            value={value}
+            onChange={(e) => onChange(section, settingKey, e.target.value)}
+            className="w-full bg-background border border-border rounded px-3 py-1.5 text-sm text-text focus:outline-none focus:ring-1 focus:ring-primary transition-all font-mono"
+        />
+    );
+};
 
 const Configuration = () => {
     // Global State
@@ -19,6 +74,10 @@ const Configuration = () => {
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [deleteWorldData, setDeleteWorldData] = useState(false);
     const [newConfigName, setNewConfigName] = useState('');
+
+    // Toast & Confirmation
+    const toast = useToast();
+    const [confirmation, setConfirmation] = useState({ isOpen: false, title: '', message: '', onConfirm: () => { }, confirmText: 'Confirm', confirmColor: 'bg-primary' });
 
     // Mods State
     const [installedMods, setInstalledMods] = useState([]);
@@ -74,12 +133,12 @@ const Configuration = () => {
         if (!newConfigName) return;
 
         if (!/^[a-zA-Z0-9_-]+$/.test(newConfigName)) {
-            alert("Config name can only contain letters, numbers, underscores, and hyphens.");
+            toast.error("Config name can only contain letters, numbers, underscores, and hyphens.");
             return;
         }
 
         if (configs.includes(newConfigName)) {
-            alert("Config name already exists!");
+            toast.error("Config name already exists!");
             return;
         }
 
@@ -117,15 +176,16 @@ const Configuration = () => {
             const remaining = configs.filter(c => c !== selectedConfig);
             if (remaining.length > 0) setSelectedConfig(remaining[0]);
             else setSelectedConfig('servertest');
+            toast.success(`Configuration "${selectedConfig}" deleted.`);
         } else {
-            alert("Failed to delete configuration.");
+            toast.error("Failed to delete configuration.");
         }
     };
 
     const handleSave = async () => {
         if (window.electronAPI) {
             await window.electronAPI.saveConfig(selectedConfig, data);
-            alert('Configuration saved successfully!');
+            toast.success('Configuration saved successfully!');
         }
     };
 
@@ -171,58 +231,7 @@ const Configuration = () => {
         }, {});
     };
 
-    const ConfigField = ({ section, settingKey, value }) => {
-        const type = typeof value;
 
-        if (typeof settingKey === 'string' && settingKey.toLowerCase().includes('password')) {
-            return (
-                <input
-                    type="password"
-                    value={value}
-                    onChange={(e) => handleConfigChange(section, settingKey, e.target.value)}
-                    className="w-full bg-background border border-border rounded px-3 py-1.5 text-sm text-text focus:outline-none focus:ring-1 focus:ring-primary transition-all font-mono"
-                />
-            );
-        }
-
-        if (type === 'boolean') {
-            return (
-                <button
-                    onClick={() => handleConfigChange(section, settingKey, !value)}
-                    className={clsx(
-                        "w-10 h-5 rounded-full transition-colors relative focus:outline-none focus:ring-1 focus:ring-primary",
-                        value ? 'bg-primary' : 'bg-surface-hover'
-                    )}
-                >
-                    <motion.div
-                        className="absolute top-1 left-1 w-3 h-3 rounded-full bg-white"
-                        animate={{ x: value ? 20 : 0 }}
-                        transition={{ type: "spring", stiffness: 500, damping: 30 }}
-                    />
-                </button>
-            );
-        }
-
-        if (type === 'number') {
-            return (
-                <input
-                    type="number"
-                    value={value}
-                    onChange={(e) => handleConfigChange(section, settingKey, parseFloat(e.target.value))}
-                    className="w-full bg-background border border-border rounded px-3 py-1.5 text-sm text-text focus:outline-none focus:ring-1 focus:ring-primary transition-all font-mono"
-                />
-            );
-        }
-
-        return (
-            <input
-                type="text"
-                value={value}
-                onChange={(e) => handleConfigChange(section, settingKey, e.target.value)}
-                className="w-full bg-background border border-border rounded px-3 py-1.5 text-sm text-text focus:outline-none focus:ring-1 focus:ring-primary transition-all font-mono"
-            />
-        );
-    };
 
     const getEnabledWorkshopIds = () => {
         const items = data.config?.WorkshopItems || '';
@@ -244,7 +253,9 @@ const Configuration = () => {
         const result = await window.electronAPI.addMod(selectedConfig, mod.workshopId, modNames);
 
         if (result.mapsAdded === 0 && mod.tags.includes("Map")) {
-            alert(`Warning: Added mod "${mod.title}" but no map folders were found.`);
+            toast.warning(`Added mod "${mod.title}" but no map folders were found.`);
+        } else {
+            toast.success(`Added mod: ${mod.title}`);
         }
 
         handleConfigChange('config', 'WorkshopItems', newItems);
@@ -278,7 +289,7 @@ const Configuration = () => {
         try {
             const ids = getEnabledWorkshopIds();
             if (ids.length === 0) {
-                alert("No mods enabled in configuration to copy.");
+                toast.info("No mods enabled in configuration to copy.");
                 setLoading(false);
                 setCopyStatus('');
                 return;
@@ -288,13 +299,13 @@ const Configuration = () => {
             const result = await window.electronAPI.copyModsFromClient(ids);
 
             if (result.success) {
-                alert(`Successfully copied ${result.count} mods to server folder.`);
+                toast.success(`Successfully copied ${result.count} mods to server folder.`);
             } else {
-                alert(`Error copying mods: ${result.error}`);
+                toast.error(`Error copying mods: ${result.error}`);
             }
         } catch (error) {
             console.error(error);
-            alert("Failed to copy mods.");
+            toast.error("Failed to copy mods.");
         } finally {
             setLoading(false);
             setCopyStatus('');
@@ -304,46 +315,75 @@ const Configuration = () => {
     const handleApplyPreset = (presetKey) => {
         const preset = PRESETS[presetKey];
         if (!preset) return;
-        if (!confirm(`Apply preset "${preset.label}"? This will overwrite current Sandbox settings.`)) return;
 
-        setData(prev => {
-            const newSandbox = JSON.parse(JSON.stringify(prev.sandbox || {}));
-            const merge = (target, source) => {
-                for (const key in source) {
-                    if (source[key] instanceof Object && !Array.isArray(source[key])) {
-                        if (!target[key]) Object.assign(target, { [key]: {} });
-                        merge(target[key], source[key]);
-                    } else {
-                        Object.assign(target, { [key]: source[key] });
-                    }
-                }
-            };
-            merge(newSandbox, preset.data);
-            return { ...prev, sandbox: newSandbox };
+        setConfirmation({
+            isOpen: true,
+            title: 'Apply Preset?',
+            message: `Apply preset "${preset.label}"? This will overwrite current Sandbox settings.`,
+            confirmText: 'Apply',
+            confirmColor: 'bg-primary',
+            onConfirm: () => {
+                setData(prev => {
+                    const newSandbox = JSON.parse(JSON.stringify(prev.sandbox || {}));
+                    const merge = (target, source) => {
+                        for (const key in source) {
+                            if (source[key] instanceof Object && !Array.isArray(source[key])) {
+                                if (!target[key]) Object.assign(target, { [key]: {} });
+                                merge(target[key], source[key]);
+                            } else {
+                                Object.assign(target, { [key]: source[key] });
+                            }
+                        }
+                    };
+                    merge(newSandbox, preset.data);
+                    return { ...prev, sandbox: newSandbox };
+                });
+                toast.success(`Preset "${preset.label}" applied! Don't forget to save.`);
+            }
         });
-        alert(`Preset "${preset.label}" applied! Don't forget to save.`);
     };
+
+    const [sophieProgress, setSophieProgress] = useState(null);
+
+    useEffect(() => {
+        if (window.electronAPI) {
+            const cleanup = window.electronAPI.onSophieProgress((data) => {
+                setSophieProgress(data);
+            });
+            return () => cleanup();
+        }
+    }, []);
 
     const handleInstallSophie = async () => {
         if (!window.electronAPI) return;
-        if (!confirm("Install Sophie Modpack files? This will copy files to your Zomboid directory.")) return;
 
-        setLoading(true);
-        try {
-            const result = await window.electronAPI.installSophiePreset();
-            if (result.success) {
-                alert(result.message);
-                await loadConfigs();
-                setSelectedConfig('server-sophie-1-14');
-            } else {
-                alert(`Failed to install: ${result.error}`);
+        setConfirmation({
+            isOpen: true,
+            title: 'Install Sophie Modpack?',
+            message: "Install Sophie Modpack files? This will download (~15MB) and copy files to your Zomboid directory.",
+            confirmText: 'Install',
+            confirmColor: 'bg-purple-500',
+            onConfirm: async () => {
+                setLoading(true);
+                setSophieProgress({ status: 'Starting...', percent: 0 });
+                try {
+                    const result = await window.electronAPI.installSophiePreset();
+                    if (result.success) {
+                        toast.success(result.message);
+                        await loadConfigs();
+                        setSelectedConfig('server-sophie-1-14');
+                    } else {
+                        toast.error(`Failed to install: ${result.error}`);
+                    }
+                } catch (err) {
+                    console.error(err);
+                    toast.error("Error installing Sophie Modpack.");
+                } finally {
+                    setLoading(false);
+                    setSophieProgress(null);
+                }
             }
-        } catch (err) {
-            console.error(err);
-            alert("Error installing Sophie Modpack.");
-        } finally {
-            setLoading(false);
-        }
+        });
     };
 
     const filteredSettings = useMemo(() => {
@@ -474,10 +514,30 @@ const Configuration = () => {
                 {renderTabs()}
 
                 {loading ? (
-                    <div className="flex-1 flex flex-col items-center justify-center text-text-muted animate-pulse gap-2">
-                        <RefreshCw size={24} className="animate-spin" />
-                        <span>Loading configuration...</span>
-                        {copyStatus && <span className="text-sm font-mono text-text">{copyStatus}</span>}
+                    <div className="flex-1 flex flex-col items-center justify-center text-text-muted animate-pulse gap-2 relative">
+                        {sophieProgress ? (
+                            <div className="flex flex-col items-center gap-3 w-64">
+                                <Download size={32} className="animate-bounce text-purple-500" />
+                                <div className="text-center">
+                                    <p className="font-medium text-text">{sophieProgress.status}</p>
+                                    <p className="text-xs text-text-muted">{sophieProgress.percent}%</p>
+                                </div>
+                                <div className="w-full h-2 bg-surface-hover rounded-full overflow-hidden">
+                                    <motion.div
+                                        className="h-full bg-purple-500"
+                                        initial={{ width: 0 }}
+                                        animate={{ width: `${sophieProgress.percent}%` }}
+                                        transition={{ duration: 0.2 }}
+                                    />
+                                </div>
+                            </div>
+                        ) : (
+                            <>
+                                <RefreshCw size={24} className="animate-spin" />
+                                <span>Loading configuration...</span>
+                                {copyStatus && <span className="text-sm font-mono text-text">{copyStatus}</span>}
+                            </>
+                        )}
                     </div>
                 ) : (
                     <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
@@ -540,7 +600,7 @@ const Configuration = () => {
                                     {Object.entries(filteredSettings).map(([key, value]) => (
                                         <div key={key} className="flex flex-col gap-1.5">
                                             <label className="text-xs text-text-muted font-medium uppercase tracking-wide">{key}</label>
-                                            <ConfigField section="config" settingKey={key} value={value} />
+                                            <ConfigField section="config" settingKey={key} value={value} onChange={handleConfigChange} />
                                         </div>
                                     ))}
                                     {Object.keys(filteredSettings).length === 0 && (
@@ -584,7 +644,7 @@ const Configuration = () => {
                                     {Object.entries(filteredSettings).map(([key, value]) => (
                                         <div key={key} className="flex flex-col gap-1.5">
                                             <label className="text-xs text-text-muted font-medium uppercase tracking-wide">{key}</label>
-                                            <ConfigField section="sandbox" settingKey={key} value={value} />
+                                            <ConfigField section="sandbox" settingKey={key} value={value} onChange={handleConfigChange} />
                                         </div>
                                     ))}
                                 </div>
@@ -603,7 +663,7 @@ const Configuration = () => {
                                     {Object.entries(filteredSettings).map(([key, value]) => (
                                         <div key={key} className="flex flex-col gap-1.5">
                                             <label className="text-xs text-text-muted font-medium uppercase tracking-wide">{key}</label>
-                                            <ConfigField section="zombies" settingKey={key} value={value} />
+                                            <ConfigField section="zombies" settingKey={key} value={value} onChange={handleConfigChange} />
                                         </div>
                                     ))}
                                     {Object.keys(filteredSettings).length === 0 && (
@@ -732,21 +792,30 @@ const Configuration = () => {
                                         <button
                                             onClick={async () => {
                                                 if (!window.electronAPI) return;
-                                                if (!confirm("Create a backup of all multiplayer saves?")) return;
-                                                setLoading(true);
-                                                try {
-                                                    const result = await window.electronAPI.backupSaves();
-                                                    if (result.success) {
-                                                        alert(`Backup created successfully at:\n${result.path}`);
-                                                    } else {
-                                                        alert(`Backup failed: ${result.error}`);
+
+                                                setConfirmation({
+                                                    isOpen: true,
+                                                    title: 'Backup Saves?',
+                                                    message: "Create a backup of all multiplayer saves?",
+                                                    confirmText: 'Backup',
+                                                    confirmColor: 'bg-success',
+                                                    onConfirm: async () => {
+                                                        setLoading(true);
+                                                        try {
+                                                            const result = await window.electronAPI.backupSaves();
+                                                            if (result.success) {
+                                                                toast.success(`Backup created successfully at:\n${result.path}`);
+                                                            } else {
+                                                                toast.error(`Backup failed: ${result.error}`);
+                                                            }
+                                                        } catch (err) {
+                                                            console.error(err);
+                                                            toast.error("Backup failed.");
+                                                        } finally {
+                                                            setLoading(false);
+                                                        }
                                                     }
-                                                } catch (err) {
-                                                    console.error(err);
-                                                    alert("Backup failed.");
-                                                } finally {
-                                                    setLoading(false);
-                                                }
+                                                });
                                             }}
                                             disabled={loading}
                                             className="flex items-center gap-2 px-4 py-2 bg-success/10 hover:bg-success/20 border border-success/20 text-success rounded-md transition-colors text-sm font-medium disabled:opacity-50"
@@ -1012,6 +1081,16 @@ const Configuration = () => {
                     </div>
                 </div>
             )}
+            {/* Confirmation Modal */}
+            <ConfirmationModal
+                isOpen={confirmation.isOpen}
+                onClose={() => setConfirmation(prev => ({ ...prev, isOpen: false }))}
+                onConfirm={confirmation.onConfirm}
+                title={confirmation.title}
+                message={confirmation.message}
+                confirmText={confirmation.confirmText}
+                confirmColor={confirmation.confirmColor}
+            />
         </div>
     );
 };

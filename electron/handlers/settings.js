@@ -21,6 +21,10 @@ export async function getSettings() {
 }
 
 export async function saveSettings(settings) {
+    if (!settings || typeof settings.pzConfigPath !== 'string' || typeof settings.steamInstallPath !== 'string') {
+        console.error('Invalid settings object:', settings);
+        return false;
+    }
     try {
         await fs.writeFile(SETTINGS_FILE, JSON.stringify(settings, null, 2));
         return true;

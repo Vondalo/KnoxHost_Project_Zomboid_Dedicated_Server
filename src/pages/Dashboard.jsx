@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Square, Activity, Terminal, Settings, Server, Clock, Users, Save, Trash2, FolderOpen, RefreshCw, Timer, RotateCcw } from 'lucide-react';
+import { Play, Square, Activity, Terminal, Settings, Server, Clock, Users, Save, Trash2, FolderOpen, RefreshCw, Timer, RotateCcw, Download } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import clsx from 'clsx';
+import { useToast } from '../context/ToastContext';
+import ConfirmationModal from '../components/ConfirmationModal';
 
 const Dashboard = () => {
     const [isRunning, setIsRunning] = useState(false);
@@ -11,10 +13,20 @@ const Dashboard = () => {
     const [skipModVerification, setSkipModVerification] = useState(false);
     const [backupInterval, setBackupInterval] = useState(0);
     const [restartTime, setRestartTime] = useState('');
+    const [passwordNeeded, setPasswordNeeded] = useState(false);
     const logsEndRef = useRef(null);
+
+    const [isInstalled, setIsInstalled] = useState(true);
+    const [installing, setInstalling] = useState(false);
+    const [isConsoleOpen, setIsConsoleOpen] = useState(true);
+
+    const toast = useToast();
+    const [confirmation, setConfirmation] = useState({ isOpen: false, title: '', message: '', onConfirm: () => { }, confirmText: 'Confirm', confirmColor: 'bg-primary' });
 
     useEffect(() => {
         loadConfigs();
+        checkInstallation();
+        const interval = setInterval(checkInstallation, 5000);
 
         if (window.electronAPI) {
             window.electronAPI.getServerStatus().then(status => setIsRunning(status));
@@ -25,15 +37,21 @@ const Dashboard = () => {
             });
 
             const cleanupOutput = window.electronAPI.onServerOutput((data) => {
-                setLogs((prev) => {
-                    const newLogs = [...prev, data];
-                    if (newLogs.length > 500) {
-                        return newLogs.slice(newLogs.length - 500);
+                if (typeof data === 'string') {
+                    setLogs((prev) => {
+                        const newLogs = [...prev, data];
+                        if (newLogs.length > 500) return newLogs.slice(newLogs.length - 500);
+                        return newLogs;
+                    });
+                    if (data.includes('Server started')) setIsRunning(true);
+                    if (data.includes('Server stopped')) {
+                        setIsRunning(false);
+                        setPasswordNeeded(false);
                     }
-                    return newLogs;
-                });
-                if (data.includes('Server started')) setIsRunning(true);
-                if (data.includes('Server stopped')) setIsRunning(false);
+                } else if (typeof data === 'object' && data.type === 'password-needed') {
+                    setPasswordNeeded(true);
+                    setLogs(prev => [...prev, '!!! ACTION REQUIRED: PLEASE ENTER ADMIN PASSWORD BELOW !!!']);
+                }
             });
 
             const cleanupBackup = window.electronAPI.onBackupComplete((result) => {
@@ -45,11 +63,13 @@ const Dashboard = () => {
             });
 
             return () => {
+                clearInterval(interval);
                 cleanupOutput();
                 cleanupBackup();
             };
         } else {
             setLogs(prev => [...prev, 'Electron API not available. Are you running in a browser?']);
+            return () => clearInterval(interval);
         }
     }, []);
 
@@ -60,6 +80,27 @@ const Dashboard = () => {
     useEffect(() => {
         localStorage.setItem('lastSelectedConfig', serverName);
     }, [serverName]);
+
+    const checkInstallation = async () => {
+        if (window.electronAPI) {
+            const installed = await window.electronAPI.isServerInstalled();
+            setIsInstalled(installed);
+        }
+    };
+
+    const handleInstallServer = async () => {
+        setInstalling(true);
+        try {
+            await window.electronAPI.installServer();
+            toast.success("Server installed successfully!");
+            setIsInstalled(true);
+        } catch (err) {
+            console.error(err);
+            toast.error("Failed to install server.");
+        } finally {
+            setInstalling(false);
+        }
+    };
 
     const loadConfigs = async () => {
         if (!window.electronAPI) return;
@@ -153,6 +194,32 @@ const Dashboard = () => {
                     )}
                 </motion.div>
 
+                {/* Network Info Card */}
+                <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.15 }}
+                    className="bg-surface border border-border rounded-lg p-6 shadow-sm relative overflow-hidden"
+                >
+                    <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-text-muted text-sm font-medium uppercase tracking-wider">Network Info</h3>
+                        <div className="flex gap-1">
+                            <div className="w-2 h-2 rounded-full bg-success/50"></div>
+                            <div className="w-2 h-2 rounded-full bg-blue-500/50"></div>
+                        </div>
+                    </div>
+                    <div className="space-y-3">
+                        <div className="flex justify-between items-center">
+                            <span className="text-xs text-text-muted">UDP Port</span>
+                            <span className="text-sm font-mono text-text bg-surface-hover px-2 py-1 rounded">16261</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                            <span className="text-xs text-text-muted">Direct Connect</span>
+                            <span className="text-sm font-mono text-text bg-surface-hover px-2 py-1 rounded">16262</span>
+                        </div>
+                    </div>
+                </motion.div>
+
                 {/* Controls Card */}
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
@@ -202,26 +269,45 @@ const Dashboard = () => {
                         </div>
 
                         <div className="flex gap-3 w-full md:w-auto">
-                            <motion.button
-                                whileHover={{ scale: 1.02 }}
-                                whileTap={{ scale: 0.98 }}
-                                onClick={handleStart}
-                                disabled={isRunning || !window.electronAPI}
-                                className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-2 bg-success/10 hover:bg-success/20 border border-success/20 hover:border-success text-success rounded-md transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow-success/20"
-                            >
-                                <Play size={16} fill="currentColor" />
-                                <span className="font-medium">Start</span>
-                            </motion.button>
-                            <motion.button
-                                whileHover={{ scale: 1.02 }}
-                                whileTap={{ scale: 0.98 }}
-                                onClick={handleStop}
-                                disabled={!isRunning || !window.electronAPI}
-                                className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-2 bg-error/10 hover:bg-error/20 border border-error/20 hover:border-error text-error rounded-md transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow-error/20"
-                            >
-                                <Square size={16} fill="currentColor" />
-                                <span className="font-medium">Stop</span>
-                            </motion.button>
+                            {!isInstalled ? (
+                                <motion.button
+                                    whileHover={{ scale: 1.02 }}
+                                    whileTap={{ scale: 0.98 }}
+                                    onClick={handleInstallServer}
+                                    disabled={installing || !window.electronAPI}
+                                    className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-2 bg-primary/10 hover:bg-primary/20 border border-primary/20 hover:border-primary text-primary rounded-md transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow-primary/20"
+                                >
+                                    {installing ? (
+                                        <RefreshCw size={16} className="animate-spin" />
+                                    ) : (
+                                        <Download size={16} />
+                                    )}
+                                    <span className="font-medium">{installing ? 'Installing...' : 'Install Server'}</span>
+                                </motion.button>
+                            ) : (
+                                <>
+                                    <motion.button
+                                        whileHover={{ scale: 1.02 }}
+                                        whileTap={{ scale: 0.98 }}
+                                        onClick={handleStart}
+                                        disabled={isRunning || !window.electronAPI}
+                                        className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-2 bg-success/10 hover:bg-success/20 border border-success/20 hover:border-success text-success rounded-md transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow-success/20"
+                                    >
+                                        <Play size={16} fill="currentColor" />
+                                        <span className="font-medium">Start</span>
+                                    </motion.button>
+                                    <motion.button
+                                        whileHover={{ scale: 1.02 }}
+                                        whileTap={{ scale: 0.98 }}
+                                        onClick={handleStop}
+                                        disabled={!isRunning || !window.electronAPI}
+                                        className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-2 bg-error/10 hover:bg-error/20 border border-error/20 hover:border-error text-error rounded-md transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow-error/20"
+                                    >
+                                        <Square size={16} fill="currentColor" />
+                                        <span className="font-medium">Stop</span>
+                                    </motion.button>
+                                </>
+                            )}
                         </div>
                     </div>
                 </motion.div>
@@ -279,6 +365,28 @@ const Dashboard = () => {
                 </div>
             </motion.div>
 
+            {/* Password Prompt Alert */}
+            <AnimatePresence>
+                {passwordNeeded && (
+                    <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: 20 }}
+                        className="bg-warning/10 border border-warning/50 rounded-lg p-4 flex items-center justify-between shadow-lg animate-pulse"
+                    >
+                        <div className="flex items-center gap-3">
+                            <div className="p-2 bg-warning/20 rounded-full text-warning">
+                                <Terminal size={20} />
+                            </div>
+                            <div>
+                                <h4 className="text-warning font-bold">Admin Password Required!</h4>
+                                <p className="text-xs text-text-muted">The server is waiting for you to set an admin password. Please type it in the console below and press Enter.</p>
+                            </div>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
             {/* Save Management */}
             <motion.div
                 initial={{ opacity: 0, y: 20 }}
@@ -321,22 +429,44 @@ const Dashboard = () => {
                             whileHover={{ scale: 1.05 }}
                             whileTap={{ scale: 0.95 }}
                             onClick={async () => {
+                                if (window.electronAPI) await window.electronAPI.openServerFolder();
+                            }}
+                            className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-text-muted hover:text-text bg-surface-hover hover:bg-border rounded-md transition-colors"
+                        >
+                            <FolderOpen size={14} />
+                            Server Folder
+                        </motion.button>
+
+                        <motion.button
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            onClick={async () => {
                                 if (window.electronAPI) await window.electronAPI.openSavesFolder();
                             }}
                             className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-text-muted hover:text-text bg-surface-hover hover:bg-border rounded-md transition-colors"
                         >
                             <FolderOpen size={14} />
-                            Open Folder
+                            Saves Folder
                         </motion.button>
+
                         <motion.button
                             whileHover={{ scale: 1.05 }}
                             whileTap={{ scale: 0.95 }}
                             onClick={async () => {
                                 if (!window.electronAPI) return;
-                                if (!confirm("Backup all saves?")) return;
-                                const result = await window.electronAPI.backupSaves();
-                                if (result.success) alert(`Backup created at: ${result.path}`);
-                                else alert(`Backup failed: ${result.error}`);
+
+                                setConfirmation({
+                                    isOpen: true,
+                                    title: 'Backup All Saves?',
+                                    message: "Are you sure you want to backup all multiplayer saves?",
+                                    confirmText: 'Backup',
+                                    confirmColor: 'bg-success',
+                                    onConfirm: async () => {
+                                        const result = await window.electronAPI.backupSaves();
+                                        if (result.success) toast.success(`Backup created at: ${result.path}`);
+                                        else toast.error(`Backup failed: ${result.error}`);
+                                    }
+                                });
                             }}
                             className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-success bg-success/10 hover:bg-success/20 rounded-md transition-colors"
                         >
@@ -347,6 +477,17 @@ const Dashboard = () => {
                 </div>
                 <SaveList />
             </motion.div>
+
+            {/* Confirmation Modal */}
+            <ConfirmationModal
+                isOpen={confirmation.isOpen}
+                onClose={() => setConfirmation(prev => ({ ...prev, isOpen: false }))}
+                onConfirm={confirmation.onConfirm}
+                title={confirmation.title}
+                message={confirmation.message}
+                confirmText={confirmation.confirmText}
+                confirmColor={confirmation.confirmColor}
+            />
         </div>
     );
 };
@@ -354,6 +495,8 @@ const Dashboard = () => {
 const SaveList = () => {
     const [saves, setSaves] = useState([]);
     const [loading, setLoading] = useState(false);
+    const toast = useToast();
+    const [confirmation, setConfirmation] = useState({ isOpen: false, title: '', message: '', onConfirm: () => { }, confirmText: 'Confirm', confirmColor: 'bg-primary' });
 
     const loadSaves = async () => {
         if (!window.electronAPI) return;
@@ -368,12 +511,24 @@ const SaveList = () => {
     }, []);
 
     const handleDelete = async (saveName) => {
-        if (!confirm(`Are you sure you want to delete save "${saveName}"? This is irreversible.`)) return;
-        if (window.electronAPI) {
-            const success = await window.electronAPI.deleteSave(saveName);
-            if (success) loadSaves();
-            else alert("Failed to delete save.");
-        }
+        setConfirmation({
+            isOpen: true,
+            title: 'Delete Save?',
+            message: `Are you sure you want to delete save "${saveName}"? This is irreversible.`,
+            confirmText: 'Delete',
+            confirmColor: 'bg-error',
+            onConfirm: async () => {
+                if (window.electronAPI) {
+                    const success = await window.electronAPI.deleteSave(saveName);
+                    if (success) {
+                        toast.success(`Save "${saveName}" deleted.`);
+                        loadSaves();
+                    } else {
+                        toast.error("Failed to delete save.");
+                    }
+                }
+            }
+        });
     };
 
     return (
@@ -416,6 +571,16 @@ const SaveList = () => {
                     </AnimatePresence>
                 )}
             </div>
+            {/* Confirmation Modal for SaveList */}
+            <ConfirmationModal
+                isOpen={confirmation.isOpen}
+                onClose={() => setConfirmation(prev => ({ ...prev, isOpen: false }))}
+                onConfirm={confirmation.onConfirm}
+                title={confirmation.title}
+                message={confirmation.message}
+                confirmText={confirmation.confirmText}
+                confirmColor={confirmation.confirmColor}
+            />
         </div>
     );
 };

@@ -526,7 +526,7 @@ export async function removeModFromServer(configName, workshopId, modIds) {
 }
 
 export async function copyModsFromClient(modIds, onLog) {
-    if (!modIds || modIds.length === 0) return;
+    if (!modIds || modIds.length === 0) return { success: false, error: 'No mods specified' };
 
     const libraries = await getSteamLibraryFolders();
     const serverWorkshopDir = path.join(SERVER_DIR, 'steamapps', 'workshop', 'content', PZ_APP_ID);
@@ -550,7 +550,7 @@ export async function copyModsFromClient(modIds, onLog) {
 
                     // Copy recursively
                     if (onLog) onLog(`Copying mod ${modId} from client library...`);
-                    await fs.cp(clientModPath, targetPath, { recursive: true });
+                    await fs.cp(clientModPath, targetPath, { recursive: true, force: true });
 
                     copiedCount++;
                     found = true;
@@ -568,5 +568,5 @@ export async function copyModsFromClient(modIds, onLog) {
     }
 
     if (onLog) onLog(`Finished copying. Copied ${copiedCount}/${modIds.length} mods.`);
-    return copiedCount;
+    return { success: true, count: copiedCount };
 }

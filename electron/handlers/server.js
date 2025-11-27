@@ -6,6 +6,7 @@ import { constants } from 'fs';
 
 import { readConfig } from './config.js';
 import { installServer, downloadMods } from './steamcmd.js';
+import { isValidServerName } from './validation.js';
 
 const SERVER_DIR = path.join(app.getPath('userData'), 'server');
 let serverProcess = null;
@@ -41,8 +42,20 @@ export function getServerLogs() {
     return serverState.logs;
 }
 
+export async function isServerInstalled() {
+    const batPath = path.join(SERVER_DIR, 'StartServer64.bat');
+    return await exists(batPath);
+}
+
 export async function startServer(serverName, onData, skipModVerification = false) {
     if (serverProcess) return false;
+
+    if (!isValidServerName(serverName)) {
+        const msg = `Error: Invalid server name "${serverName}". Only alphanumeric characters, hyphens, and underscores are allowed.`;
+        if (onData) onData(msg);
+        addLog(msg);
+        return false;
+    }
 
     currentServerName = serverName; // Update current server name
 
@@ -154,12 +167,22 @@ export async function startServer(serverName, onData, skipModVerification = fals
         const msg = data.toString();
         if (onData) onData(msg);
         addLog(msg);
+
+        // Detect password prompt
+        if (msg.includes('Enter new administrator password')) {
+            if (onData) onData({ type: 'password-needed' });
+        }
     });
 
     serverProcess.stderr.on('data', (data) => {
         const msg = data.toString();
         if (onData) onData(msg);
         addLog(msg);
+
+        // Detect password prompt in stderr too, just in case
+        if (msg.includes('Enter new administrator password')) {
+            if (onData) onData({ type: 'password-needed' });
+        }
     });
 
     serverProcess.on('close', () => {
@@ -170,26 +193,61 @@ export async function startServer(serverName, onData, skipModVerification = fals
         addLog(stopMsg);
     });
 
-    return true;
+    try {
+        const content = await fs.readFile(batPath, 'utf8');
+        // Look for -Xms and -Xmx
+        const minMatch = content.match(/-Xms(\d+[gm])/);
+        const maxMatch = content.match(/-Xmx(\d+[gm])/);
+
+        return {
+            min: minMatch ? minMatch[1] : '4g',
+            max: maxMatch ? maxMatch[1] : '4g'
+        };
+    } catch (err) {
+        console.error('Error reading memory settings:', err);
+        return { min: '4g', max: '4g' };
+    }
 }
 
-export function stopServer() {
+export async function stopServer() {
     if (serverProcess) {
-        serverProcess.kill();
-        serverProcess = null;
-        serverState.isRunning = false;
-        addLog('Server stopped (manual stop).');
+        addLog('Stopping server...');
+
+        // 1. Notify and Save
+        if (serverProcess && serverState.isRunning) {
+            sendCommand('servermsg "Server is shutting down..."');
+            sendCommand('save');
+
+            // Wait 5s for save to process
+            await new Promise(resolve => setTimeout(resolve, 5000));
+
+            // 2. Quit
+            sendCommand('quit');
+            addLog('> quit');
+        }
+
+        // 3. Wait for graceful exit
+        // We do NOT force kill. We let the server take its time to close.
+        // The 'close' event handler in startServer will clean up the state.
+
         return true;
     }
     return false;
 }
 
 export function sendCommand(command) {
-    if (serverProcess && serverProcess.stdin) {
-        serverProcess.stdin.write(command + '\n');
-        addLog(`> ${command}`);
-        return true;
+    if (serverProcess && serverProcess.stdin && !serverProcess.killed) {
+        try {
+            serverProcess.stdin.write(command + '\n');
+            addLog(`> ${command}`);
+            return true;
+        } catch (err) {
+            console.error('Failed to write to server stdin:', err);
+            addLog(`Error sending command: ${err.message}`);
+            return false;
+        }
     }
+    addLog('Error: Server is not running or input is unavailable.');
     return false;
 }
 
@@ -244,6 +302,17 @@ export async function openSavesFolder() {
         return true;
     } catch (err) {
         console.error('Failed to open saves folder:', err);
+        return false;
+    }
+}
+
+export async function openServerFolder() {
+    try {
+        await fs.mkdir(SERVER_DIR, { recursive: true });
+        await import('electron').then(e => e.shell.openPath(SERVER_DIR));
+        return true;
+    } catch (err) {
+        console.error('Failed to open server folder:', err);
         return false;
     }
 }
@@ -342,8 +411,8 @@ export function startRestartSchedule(timeString) {
                         }
                     } else if (attempts >= maxAttempts) {
                         clearInterval(checkServerStopped);
-                        addLog('Error: Server failed to stop in time. Forcing kill...');
-                        stopServer(); // Force kill
+                        addLog('Error: Server failed to stop in time. Retrying stop...');
+                        stopServer(); // Attempt safe stop again
 
                         setTimeout(async () => {
                             if (currentServerName) {

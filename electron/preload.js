@@ -15,8 +15,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getMemory: () => ipcRenderer.invoke('server:getMemory'),
     setMemory: (min, max) => ipcRenderer.invoke('server:setMemory', min, max),
     getServerStatus: () => ipcRenderer.invoke('server:status'),
+    isServerInstalled: () => ipcRenderer.invoke('server:isInstalled'),
     getServerLogs: () => ipcRenderer.invoke('server:logs'),
     openSavesFolder: () => ipcRenderer.invoke('server:openSaves'),
+    openServerFolder: () => ipcRenderer.invoke('server:openFolder'),
     backupSaves: () => ipcRenderer.invoke('server:backupSaves'),
     sendCommand: (command) => ipcRenderer.invoke('server:sendCommand', command),
     startBackupSchedule: (interval) => ipcRenderer.invoke('server:startBackupSchedule', interval),
@@ -44,8 +46,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
     getWhitelist: (serverName) => ipcRenderer.invoke('whitelist:get', serverName),
     addToWhitelist: (serverName, username, password, isAdmin) => ipcRenderer.invoke('whitelist:add', serverName, username, password, isAdmin),
-    addToWhitelist: (serverName, username, password, isAdmin) => ipcRenderer.invoke('whitelist:add', serverName, username, password, isAdmin),
     removeFromWhitelist: (serverName, username) => ipcRenderer.invoke('whitelist:remove', serverName, username),
     getSettings: () => ipcRenderer.invoke('settings:get'),
     saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
+    onSophieProgress: (callback) => {
+        const subscription = (_, data) => callback(data);
+        ipcRenderer.on('sophie:progress', subscription);
+        return () => ipcRenderer.removeListener('sophie:progress', subscription);
+    },
 });

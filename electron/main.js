@@ -14,6 +14,15 @@ const __dirname = path.dirname(__filename);
 let tray = null;
 let isQuitting = false;
 
+// Global Error Handling
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+process.on('uncaughtException', (error) => {
+    console.error('Uncaught Exception:', error);
+});
+
 // Register scheme as privileged
 protocol.registerSchemesAsPrivileged([
     { scheme: 'media', privileges: { secure: true, supportFetchAPI: true, bypassCSP: true, standard: true } }
@@ -102,14 +111,24 @@ app.whenReady().then(() => {
 
     // IPC Handlers
     ipcMain.handle('steamcmd:ensure', ensureSteamCMD);
-    ipcMain.handle('server:install', installServer);
+    ipcMain.handle('server:install', async () => {
+        const win = BrowserWindow.getAllWindows()[0];
+        return await installServer((data) => {
+            win.webContents.send('server:output', data);
+        });
+    });
     ipcMain.handle('config:list', getConfigs);
     ipcMain.handle('config:read', (_, name) => readConfig(name));
     ipcMain.handle('config:save', (_, name, data) => saveConfig(name, data));
     ipcMain.handle('config:delete', (_, name) => deleteConfig(name));
     ipcMain.handle('config:open', (_, name) => openConfigFile(name));
     ipcMain.handle('config:reveal', (_, name) => revealConfigFile(name));
-    ipcMain.handle('config:installSophie', installSophiePreset);
+    ipcMain.handle('config:installSophie', async () => {
+        const win = BrowserWindow.getAllWindows()[0];
+        return await installSophiePreset((progress) => {
+            win.webContents.send('sophie:progress', progress);
+        });
+    });
 
     ipcMain.handle('server:start', async (_, name, skipModVerification) => {
         const win = BrowserWindow.getAllWindows()[0];
@@ -123,7 +142,15 @@ app.whenReady().then(() => {
     ipcMain.handle('server:setMemory', (_, min, max) => setMemorySettings(min, max));
     ipcMain.handle('server:status', getServerStatus);
     ipcMain.handle('server:logs', getServerLogs);
+    ipcMain.handle('server:isInstalled', async () => {
+        const { isServerInstalled } = await import('./handlers/server.js');
+        return isServerInstalled();
+    });
     ipcMain.handle('server:openSaves', openSavesFolder);
+    ipcMain.handle('server:openFolder', async () => {
+        const { openServerFolder } = await import('./handlers/server.js');
+        return openServerFolder();
+    });
     ipcMain.handle('server:backupSaves', backupSaves);
     ipcMain.handle('server:sendCommand', async (_, command) => {
         const { sendCommand } = await import('./handlers/server.js');

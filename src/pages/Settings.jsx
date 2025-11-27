@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Save, Folder, AlertTriangle } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { useToast } from '../context/ToastContext';
 
 const Settings = () => {
     const [settings, setSettings] = useState({
@@ -9,7 +10,7 @@ const Settings = () => {
     });
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
-    const [message, setMessage] = useState(null);
+    const toast = useToast();
 
     useEffect(() => {
         loadSettings();
@@ -21,25 +22,29 @@ const Settings = () => {
             setSettings(data);
         } catch (error) {
             console.error('Failed to load settings:', error);
-            setMessage({ type: 'error', text: 'Failed to load settings.' });
+            toast.error('Failed to load settings.');
         } finally {
             setLoading(false);
         }
     };
 
     const handleSave = async () => {
+        if (!settings.pzConfigPath.trim() || !settings.steamInstallPath.trim()) {
+            toast.error('Paths cannot be empty.');
+            return;
+        }
+
         setSaving(true);
-        setMessage(null);
         try {
             const success = await window.electronAPI.saveSettings(settings);
             if (success) {
-                setMessage({ type: 'success', text: 'Settings saved successfully!' });
+                toast.success('Settings saved successfully!');
             } else {
-                setMessage({ type: 'error', text: 'Failed to save settings.' });
+                toast.error('Failed to save settings.');
             }
         } catch (error) {
             console.error('Failed to save settings:', error);
-            setMessage({ type: 'error', text: 'An error occurred while saving.' });
+            toast.error('An error occurred while saving.');
         } finally {
             setSaving(false);
         }
@@ -71,15 +76,7 @@ const Settings = () => {
                 </button>
             </div>
 
-            {message && (
-                <motion.div
-                    initial={{ opacity: 0, y: -10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className={`p-4 rounded-md border ${message.type === 'success' ? 'bg-green-500/10 border-green-500/20 text-green-500' : 'bg-red-500/10 border-red-500/20 text-red-500'}`}
-                >
-                    {message.text}
-                </motion.div>
-            )}
+
 
             <div className="space-y-6">
                 {/* Paths Configuration */}

@@ -3,6 +3,8 @@ import path from 'path';
 import { app } from 'electron';
 import fs from 'fs/promises';
 import { constants } from 'fs';
+import crypto from 'crypto';
+import { getServerStatus, sendCommand } from './server.js';
 
 // Helper for async file existence check
 async function exists(filePath) {
@@ -27,7 +29,7 @@ export async function getWhitelist(serverName) {
 
     let db;
     try {
-        db = new Database(dbPath, { readonly: true });
+        db = new Database(dbPath, { readonly: true, timeout: 5000 });
         // Check if whitelist table exists
         const tableExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='whitelist'").get();
         if (!tableExists) return [];
@@ -43,6 +45,20 @@ export async function getWhitelist(serverName) {
 }
 
 export async function addToWhitelist(serverName, username, password, isAdmin = false) {
+    // Check if server is running
+    if (getServerStatus()) {
+        console.log('Server is running, adding user via console command...');
+        // Use console commands
+        sendCommand(`adduser "${username}" "${password}"`);
+        if (isAdmin) {
+            // Wait a bit to ensure user is added before setting access level
+            setTimeout(() => {
+                sendCommand(`setaccesslevel "${username}" "admin"`);
+            }, 1000);
+        }
+        return { success: true };
+    }
+
     const dbPath = getDbPath(serverName);
 
     // If DB doesn't exist, we might need to create it or wait for server to create it.
@@ -54,7 +70,8 @@ export async function addToWhitelist(serverName, username, password, isAdmin = f
 
     let db;
     try {
-        db = new Database(dbPath);
+        db = new Database(dbPath, { timeout: 5000 });
+
 
         // Ensure table exists (just in case)
         db.exec(`
@@ -67,8 +84,11 @@ export async function addToWhitelist(serverName, username, password, isAdmin = f
             )
         `);
 
+        // Hash password with MD5
+        const hashedPassword = crypto.createHash('md5').update(password).digest('hex');
+
         const stmt = db.prepare('INSERT OR REPLACE INTO whitelist (username, password, admin) VALUES (?, ?, ?)');
-        stmt.run(username, password, isAdmin ? 1 : 0);
+        stmt.run(username, hashedPassword, isAdmin ? 1 : 0);
         return { success: true };
     } catch (err) {
         console.error(`Error adding to whitelist in ${dbPath}:`, err);
@@ -84,7 +104,7 @@ export async function removeFromWhitelist(serverName, username) {
 
     let db;
     try {
-        db = new Database(dbPath);
+        db = new Database(dbPath, { timeout: 5000 });
         const stmt = db.prepare('DELETE FROM whitelist WHERE username = ?');
         const info = stmt.run(username);
         return { success: info.changes > 0 };

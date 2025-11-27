@@ -5,6 +5,7 @@ import path from 'path';
 import ini from 'ini';
 import { app, shell } from 'electron';
 import { getSettings } from './settings.js';
+import { isValidServerName } from './validation.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -55,6 +56,11 @@ export async function getConfigs() {
 }
 
 export async function readConfig(serverName) {
+    if (!isValidServerName(serverName)) {
+        console.error(`Invalid server name: ${serverName}`);
+        return { config: {}, sandbox: {}, spawnregions: '', zombies: {}, metadata: { memory: { min: '4', max: '4' } } };
+    }
+
     const CONFIG_DIR = await getConfigDir();
     const iniPath = path.join(CONFIG_DIR, `${serverName}.ini`);
     const luaPath = path.join(CONFIG_DIR, `${serverName}_SandboxVars.lua`);
@@ -126,7 +132,10 @@ export async function readConfig(serverName) {
             let stack = [sandbox];
 
             lines.forEach(line => {
-                line = line.trim();
+                // Strip comments
+                line = line.split('--')[0].trim();
+                if (!line) return;
+
                 if (line.startsWith('SandboxVars') || line.startsWith('return')) return;
                 if (line === '}' || line === '},') {
                     if (stack.length > 1) {
@@ -176,6 +185,9 @@ export async function readConfig(serverName) {
 }
 
 export async function saveConfig(serverName, data) {
+    if (!isValidServerName(serverName)) {
+        throw new Error(`Invalid server name: ${serverName}`);
+    }
     const CONFIG_DIR = await getConfigDir();
     if (!(await exists(CONFIG_DIR))) {
         await fs.mkdir(CONFIG_DIR, { recursive: true });
@@ -259,6 +271,10 @@ export async function saveConfig(serverName, data) {
 }
 
 export async function deleteConfig(serverName, deleteWorld = false) {
+    if (!isValidServerName(serverName)) {
+        console.error(`Invalid server name: ${serverName}`);
+        return false;
+    }
     const CONFIG_DIR = await getConfigDir();
     const iniPath = path.join(CONFIG_DIR, `${serverName}.ini`);
     const luaPath = path.join(CONFIG_DIR, `${serverName}_SandboxVars.lua`);
@@ -300,6 +316,7 @@ export async function deleteConfig(serverName, deleteWorld = false) {
 }
 
 export async function openConfigFile(serverName) {
+    if (!isValidServerName(serverName)) return false;
     const CONFIG_DIR = await getConfigDir();
     const iniPath = path.join(CONFIG_DIR, `${serverName}.ini`);
     if (await exists(iniPath)) {
@@ -310,6 +327,7 @@ export async function openConfigFile(serverName) {
 }
 
 export async function revealConfigFile(serverName) {
+    if (!isValidServerName(serverName)) return false;
     const CONFIG_DIR = await getConfigDir();
     const iniPath = path.join(CONFIG_DIR, `${serverName}.ini`);
     if (await exists(iniPath)) {
@@ -319,14 +337,75 @@ export async function revealConfigFile(serverName) {
     return false;
 }
 
-export async function installSophiePreset() {
-    const sourceDir = path.join(__dirname, '../../resources/presets');
+export async function installSophiePreset(onProgress) {
     const settings = await getSettings();
     const destBase = settings.pzConfigPath || path.join(app.getPath('home'), 'Zomboid');
+    const tempDir = app.getPath('temp');
+    const zipPath = path.join(tempDir, 'sophie_preset.zip');
+    const extractPath = path.join(tempDir, 'sophie_extracted');
+    const downloadUrl = 'https://drive.google.com/uc?export=download&id=1SKnAm9rEjzcypx4jqb85YmmZlpyU0nkb';
 
     try {
-        if (!(await exists(sourceDir))) {
-            throw new Error(`Sophie Files not found at ${sourceDir}`);
+        if (onProgress) onProgress({ status: 'Downloading...', percent: 0 });
+
+        // 1. Download File
+        const response = await fetch(downloadUrl);
+        if (!response.ok) throw new Error(`Failed to download: ${response.statusText}`);
+
+        const totalBytes = Number(response.headers.get('content-length')) || 0;
+        let downloadedBytes = 0;
+        const fileStream = await fs.open(zipPath, 'w');
+
+        // Node 18+ fetch body is a ReadableStream
+        const reader = response.body.getReader();
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            await fileStream.write(value);
+            downloadedBytes += value.length;
+
+            if (totalBytes > 0 && onProgress) {
+                const percent = Math.round((downloadedBytes / totalBytes) * 100);
+                onProgress({ status: 'Downloading...', percent });
+            }
+        }
+        await fileStream.close();
+
+        if (onProgress) onProgress({ status: 'Extracting...', percent: 100 });
+
+        // 2. Unzip using PowerShell (Windows only, but app is for Windows)
+        // Clean previous extraction if exists
+        if (await exists(extractPath)) {
+            await fs.rm(extractPath, { recursive: true, force: true });
+        }
+
+        const { exec } = await import('child_process');
+        const psCommand = `powershell -command "Expand-Archive -Path '${zipPath}' -DestinationPath '${extractPath}' -Force"`;
+
+        await new Promise((resolve, reject) => {
+            exec(psCommand, (error, stdout, stderr) => {
+                if (error) {
+                    console.error('Unzip error:', stderr);
+                    reject(error);
+                } else {
+                    resolve();
+                }
+            });
+        });
+
+        if (onProgress) onProgress({ status: 'Installing...', percent: 100 });
+
+        // 3. Move Files
+        // The zip structure is likely: Sophie Files/{Server, Lua, Sandbox Presets} or just {Server, Lua, ...}
+        // Let's check what's inside extractPath
+        const extractedFiles = await fs.readdir(extractPath);
+        let sourceRoot = extractPath;
+
+        // If there's a single folder inside, go into it (common with zips)
+        if (extractedFiles.length === 1 && (await fs.stat(path.join(extractPath, extractedFiles[0]))).isDirectory()) {
+            sourceRoot = path.join(extractPath, extractedFiles[0]);
         }
 
         // Ensure destination directories exist
@@ -335,21 +414,25 @@ export async function installSophiePreset() {
         await fs.mkdir(path.join(destBase, 'Sandbox Presets'), { recursive: true });
 
         // Copy Server folder
-        if (await exists(path.join(sourceDir, 'Server'))) {
-            await fs.cp(path.join(sourceDir, 'Server'), path.join(destBase, 'Server'), { recursive: true, force: true });
+        if (await exists(path.join(sourceRoot, 'Server'))) {
+            await fs.cp(path.join(sourceRoot, 'Server'), path.join(destBase, 'Server'), { recursive: true, force: true });
         }
 
         // Copy Lua folder
-        if (await exists(path.join(sourceDir, 'Lua'))) {
-            await fs.cp(path.join(sourceDir, 'Lua'), path.join(destBase, 'Lua'), { recursive: true, force: true });
+        if (await exists(path.join(sourceRoot, 'Lua'))) {
+            await fs.cp(path.join(sourceRoot, 'Lua'), path.join(destBase, 'Lua'), { recursive: true, force: true });
         }
 
         // Copy Sandbox Presets folder
-        if (await exists(path.join(sourceDir, 'Sandbox Presets'))) {
-            await fs.cp(path.join(sourceDir, 'Sandbox Presets'), path.join(destBase, 'Sandbox Presets'), { recursive: true, force: true });
+        if (await exists(path.join(sourceRoot, 'Sandbox Presets'))) {
+            await fs.cp(path.join(sourceRoot, 'Sandbox Presets'), path.join(destBase, 'Sandbox Presets'), { recursive: true, force: true });
         }
 
-        return { success: true, message: 'Sophie Modpack files installed successfully.' };
+        // Cleanup
+        await fs.unlink(zipPath);
+        await fs.rm(extractPath, { recursive: true, force: true });
+
+        return { success: true, message: 'Sophie Modpack installed successfully.' };
     } catch (error) {
         console.error('Error installing Sophie Preset:', error);
         return { success: false, error: error.message };

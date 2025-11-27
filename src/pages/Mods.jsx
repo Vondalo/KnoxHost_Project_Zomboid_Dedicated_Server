@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Search, RefreshCw, Box, Check, ExternalLink, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import clsx from 'clsx';
+import { useToast } from '../context/ToastContext';
 
 const Mods = () => {
     const [mods, setMods] = useState([]);
@@ -9,6 +10,7 @@ const Mods = () => {
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedConfig, setSelectedConfig] = useState(() => localStorage.getItem('lastSelectedConfig') || 'servertest');
     const [configData, setConfigData] = useState(null);
+    const toast = useToast();
 
     // Pagination State
     const [currentPage, setCurrentPage] = useState(1);
@@ -35,6 +37,7 @@ const Mods = () => {
             setMods(list);
         } catch (error) {
             console.error("Failed to load mods:", error);
+            toast.error("Failed to load mods from Steam Workshop.");
         } finally {
             setLoading(false);
         }
@@ -47,6 +50,7 @@ const Mods = () => {
             setConfigData(data);
         } catch (error) {
             console.error("Failed to load config data:", error);
+            toast.error("Failed to load configuration data.");
         }
     };
 
@@ -63,12 +67,15 @@ const Mods = () => {
         try {
             if (isEnabled) {
                 await window.electronAPI.removeMod(selectedConfig, mod.workshopId, modIds);
+                toast.success(`Removed mod: ${mod.title}`);
             } else {
                 await window.electronAPI.addMod(selectedConfig, mod.workshopId, modIds);
+                toast.success(`Added mod: ${mod.title}`);
             }
             await loadConfigData();
         } catch (error) {
             console.error("Failed to toggle mod:", error);
+            toast.error(`Failed to toggle mod: ${mod.title}`);
         }
     };
 

@@ -82,9 +82,17 @@ export async function installServer(onLog) {
     const maxRetries = 3;
     for (let i = 0; i < maxRetries; i++) {
         try {
+            if (onLog) onLog(`Attempt ${i + 1}/${maxRetries}: Initializing SteamCMD...`);
+            await runSteamCMD(['+login', 'anonymous', '+quit'], onLog);
+
+            // Wait a bit to ensure SteamCMD releases locks/cleans up
+            await new Promise(resolve => setTimeout(resolve, 5000));
+
             if (onLog) onLog(`Attempt ${i + 1}/${maxRetries}: Installing server...`);
+            // SteamCMD prefers forward slashes even on Windows
+            const installDir = SERVER_DIR.replace(/\\/g, '/');
             // Try without validate first to avoid 0x602 error on fresh install
-            await runSteamCMD(['+force_install_dir', SERVER_DIR, '+login', 'anonymous', '+app_update', '380870', '+quit'], onLog);
+            await runSteamCMD(['+force_install_dir', installDir, '+login', 'anonymous', '+app_update', '380870', '+quit'], onLog);
             return; // Success
         } catch (err) {
             // Check if the server file exists despite the error (e.g. exit code 7 or 8)
@@ -124,11 +132,20 @@ export async function downloadMods(modIds, onLog) {
         }
         args.push('+quit');
 
-        try {
-            await runSteamCMD(args, onLog);
-        } catch (err) {
-            if (onLog) onLog(`Error downloading batch ${currentBatchNum}: ${err.message}`);
-            throw err;
+        const maxRetries = 3;
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+            try {
+                if (attempt > 0 && onLog) onLog(`Retry ${attempt + 1}/${maxRetries} for batch ${currentBatchNum}...`);
+                await runSteamCMD(args, onLog);
+                break; // Success
+            } catch (err) {
+                if (attempt === maxRetries - 1) {
+                    if (onLog) onLog(`Error downloading batch ${currentBatchNum}: ${err.message}`);
+                    throw err;
+                }
+                // Wait before retry
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
         }
     }
 
