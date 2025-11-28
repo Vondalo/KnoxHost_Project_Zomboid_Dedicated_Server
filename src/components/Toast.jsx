@@ -1,9 +1,9 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, forwardRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, CheckCircle, AlertCircle, Info, AlertTriangle } from 'lucide-react';
 import clsx from 'clsx';
 
-const Toast = ({ id, type, message, duration = 4000, onClose }) => {
+const Toast = forwardRef(({ id, type, message, duration = 4000, onClose }, ref) => {
     useEffect(() => {
         const timer = setTimeout(() => {
             onClose(id);
@@ -28,6 +28,7 @@ const Toast = ({ id, type, message, duration = 4000, onClose }) => {
 
     return (
         <motion.div
+            ref={ref}
             layout
             initial={{ opacity: 0, y: 20, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -48,6 +49,8 @@ const Toast = ({ id, type, message, duration = 4000, onClose }) => {
             </button>
         </motion.div>
     );
-};
+});
+
+Toast.displayName = 'Toast';
 
 export default Toast;

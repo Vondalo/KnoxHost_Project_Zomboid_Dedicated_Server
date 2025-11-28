@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Square, Activity, Terminal, Settings, Server, Clock, Users, Save, Trash2, FolderOpen, RefreshCw, Timer, RotateCcw, Download } from 'lucide-react';
+import { Play, Square, Activity, Terminal, Settings, Server, Clock, Users, Save, Trash2, FolderOpen, RefreshCw, Timer, RotateCcw, Download, Shield } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import clsx from 'clsx';
 import { useToast } from '../context/ToastContext';
@@ -269,6 +269,15 @@ const Dashboard = () => {
                         </div>
 
                         <div className="flex gap-3 w-full md:w-auto">
+                            <motion.button
+                                whileHover={{ scale: 1.02 }}
+                                whileTap={{ scale: 0.98 }}
+                                onClick={() => window.location.hash = '#/admin'}
+                                className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-surface hover:bg-border border border-border text-text rounded-md transition-all shadow-sm"
+                                title="Admin Panel"
+                            >
+                                <Shield size={16} />
+                            </motion.button>
                             {!isInstalled ? (
                                 <motion.button
                                     whileHover={{ scale: 1.02 }}

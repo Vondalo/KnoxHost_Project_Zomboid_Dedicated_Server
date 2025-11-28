@@ -24,13 +24,78 @@ async function exists(filePath) {
 
 const serverState = {
     isRunning: false,
-    logs: []
+    logs: [],
+    players: []
 };
+
+// Helper to strip ANSI codes
+function stripAnsi(str) {
+    return str.replace(/\u001b\[[0-9;]*m/g, '');
+}
 
 function addLog(message) {
     serverState.logs.push(message);
     if (serverState.logs.length > 1000) {
         serverState.logs.shift();
+    }
+
+    // Split message into lines to handle multi-line chunks
+    const lines = message.split(/\r?\n/);
+
+    for (const rawLine of lines) {
+        const line = stripAnsi(rawLine); // Strip ANSI codes for parsing
+        const trimmedLine = line.trim();
+        if (!trimmedLine) continue;
+
+        // Parse player list
+        // Format usually: "Players connected (1):" followed by lines "- Username"
+        // OR "Players connected (1): - Username"
+        if (line.includes('Players connected (')) {
+            console.log('[Debug] Found player list header:', line);
+            serverState.parsingPlayers = true;
+            serverState.tempPlayers = [];
+
+            // Extract expected count
+            const countMatch = line.match(/Players connected \((\d+)\)/);
+            const expectedCount = countMatch ? parseInt(countMatch[1], 10) : 0;
+            console.log('[Debug] Expected players:', expectedCount);
+
+            // Check for player on the same line
+            const parts = line.split('):');
+            if (parts.length > 1) {
+                const potentialPlayer = parts[1].trim();
+                // Handle "- Username" or "-Username"
+                if (potentialPlayer.startsWith('-')) {
+                    const player = potentialPlayer.substring(1).trim();
+                    if (player) {
+                        serverState.tempPlayers.push(player);
+                        console.log('[Debug] Found inline player:', player);
+                    }
+                }
+            }
+
+            // If we found all expected players (e.g. 0 or 1 on same line), commit immediately
+            if (serverState.tempPlayers.length >= expectedCount) {
+                serverState.players = [...serverState.tempPlayers];
+                serverState.parsingPlayers = false;
+                serverState.tempPlayers = [];
+                console.log('[Debug] Player list updated (inline):', serverState.players);
+            }
+        } else if (serverState.parsingPlayers) {
+            if (trimmedLine.startsWith('-')) {
+                const player = trimmedLine.substring(1).trim();
+                if (player) {
+                    serverState.tempPlayers.push(player);
+                    console.log('[Debug] Found line player:', player);
+                }
+            } else {
+                // End of list
+                serverState.players = [...serverState.tempPlayers];
+                serverState.parsingPlayers = false;
+                serverState.tempPlayers = [];
+                console.log('[Debug] Player list updated (end of list):', serverState.players);
+            }
+        }
     }
 }
 
@@ -437,4 +502,133 @@ export function stopRestartSchedule() {
         return true;
     }
     return false;
+}
+
+// Player Management & Admin Commands
+
+export function getConnectedPlayers() {
+    // Send command to refresh list
+    sendCommand('players');
+    // Return current state (will be updated async by log parser)
+    console.log('[Debug] getConnectedPlayers returning:', serverState.players);
+    return serverState.players || [];
+}
+
+export function kickPlayer(username, reason) {
+    const cmd = reason ? `kick "${username}" -r "${reason}"` : `kick "${username}"`;
+    return sendCommand(cmd);
+}
+
+export function banPlayer(username, reason, ip = false) {
+    let cmd = `banuser "${username}"`;
+    if (ip) cmd += ' -ip';
+    if (reason) cmd += ` -r "${reason}"`;
+    return sendCommand(cmd);
+}
+
+export function unbanPlayer(username) {
+    return sendCommand(`unbanuser "${username}"`);
+}
+
+export function messagePlayer(username, message) {
+    // Try 'message' instead of 'msg'
+    return sendCommand(`message "${username}" "${message}"`);
+}
+
+export function teleportPlayer(username, target) {
+    // target can be another username or x,y,z
+    // If target is missing, we can't teleport from console
+    if (!target) return false;
+    return sendCommand(`teleport "${username}" "${target}"`);
+}
+
+export function setAccessLevel(username, level) {
+    // level: admin, moderator, overseer, gm, observer, none
+    return sendCommand(`setaccesslevel "${username}" "${level}"`);
+}
+
+export function giveItem(username, item, count = 1) {
+    return sendCommand(`additem "${username}" "${item}" ${count}`);
+}
+
+export function addVehicle(username, vehicle) {
+    return sendCommand(`addvehicle "${vehicle}" "${username}"`);
+}
+
+export function godMode(username, enable) {
+    // Expects -true or -false
+    return sendCommand(`godmode "${username}" -${enable}`);
+}
+
+export function invisible(username, enable) {
+    // Expects -true or -false
+    return sendCommand(`invisible "${username}" -${enable}`);
+}
+
+// World Events
+export function startRain(intensity) {
+    return sendCommand(`startrain ${intensity}`);
+}
+
+export function stopRain() {
+    return sendCommand(`stoprain`);
+}
+
+export function doChopper() {
+    return sendCommand(`chopper`);
+}
+
+export function doGunshot() {
+    return sendCommand(`gunshot`);
+}
+
+export function broadcastMessage(message) {
+    return sendCommand(`servermsg "${message}"`);
+}
+
+// Advanced Features
+export function addXp(username, skill, amount) {
+    // /addxp "username" skillname=amount
+    return sendCommand(`addxp "${username}" ${skill}=${amount}`);
+}
+
+export function unbanUser(username) {
+    return sendCommand(`unbanuser "${username}"`);
+}
+
+export function teleportToCoords(username, x, y, z) {
+    // /teleport "username" x,y,z (Attempting to use teleport for coords as teleportto is executor-only)
+    return sendCommand(`teleport "${username}" ${x},${y},${z}`);
+}
+
+import Database from 'better-sqlite3';
+
+export async function getBanList() {
+    if (!currentServerName) return [];
+
+    const dbPath = path.join(app.getPath('home'), 'Zomboid', 'db', `${currentServerName}.db`);
+
+    if (!(await exists(dbPath))) return [];
+
+    let db;
+    try {
+        db = new Database(dbPath, { readonly: true, timeout: 5000 });
+
+        // Check if tables exist
+        const tableExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='bannedip'").get();
+        if (!tableExists) return [];
+
+        // Get bans from bannedip (contains usernames)
+        const rows = db.prepare('SELECT username FROM bannedip').all();
+
+        // We could also check bannedid for SteamIDs, but for now let's stick to usernames
+        // const steamBans = db.prepare('SELECT steamid FROM bannedid').all();
+
+        return rows.map(r => r.username).filter(u => u);
+    } catch (err) {
+        console.error(`Error reading ban list from ${dbPath}:`, err);
+        return [];
+    } finally {
+        if (db) db.close();
+    }
 }

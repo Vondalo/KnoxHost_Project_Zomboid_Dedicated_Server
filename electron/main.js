@@ -157,6 +157,90 @@ app.whenReady().then(() => {
         return sendCommand(command);
     });
 
+    // Admin & Player Management IPC
+    ipcMain.handle('server:getPlayers', async () => {
+        const { getConnectedPlayers } = await import('./handlers/server.js');
+        return getConnectedPlayers();
+    });
+    ipcMain.handle('server:kickPlayer', async (_, username, reason) => {
+        const { kickPlayer } = await import('./handlers/server.js');
+        return kickPlayer(username, reason);
+    });
+    ipcMain.handle('server:banPlayer', async (_, username, reason, ip) => {
+        const { banPlayer } = await import('./handlers/server.js');
+        return banPlayer(username, reason, ip);
+    });
+    ipcMain.handle('server:unbanPlayer', async (_, username) => {
+        const { unbanPlayer } = await import('./handlers/server.js');
+        return unbanPlayer(username);
+    });
+    ipcMain.handle('server:messagePlayer', async (_, username, message) => {
+        const { messagePlayer } = await import('./handlers/server.js');
+        return messagePlayer(username, message);
+    });
+    ipcMain.handle('server:teleportPlayer', async (_, username, target) => {
+        const { teleportPlayer } = await import('./handlers/server.js');
+        return teleportPlayer(username, target);
+    });
+    ipcMain.handle('server:setAccessLevel', async (_, username, level) => {
+        const { setAccessLevel } = await import('./handlers/server.js');
+        return setAccessLevel(username, level);
+    });
+    ipcMain.handle('server:giveItem', async (_, username, item, count) => {
+        const { giveItem } = await import('./handlers/server.js');
+        return giveItem(username, item, count);
+    });
+    ipcMain.handle('server:addVehicle', async (_, username, vehicle) => {
+        const { addVehicle } = await import('./handlers/server.js');
+        return addVehicle(username, vehicle);
+    });
+    ipcMain.handle('server:godMode', async (_, username, enable) => {
+        const { godMode } = await import('./handlers/server.js');
+        return godMode(username, enable);
+    });
+    ipcMain.handle('server:invisible', async (_, username, enable) => {
+        const { invisible } = await import('./handlers/server.js');
+        return invisible(username, enable);
+    });
+    ipcMain.handle('server:startRain', async (_, intensity) => {
+        const { startRain } = await import('./handlers/server.js');
+        return startRain(intensity);
+    });
+    ipcMain.handle('server:stopRain', async () => {
+        const { stopRain } = await import('./handlers/server.js');
+        return stopRain();
+    });
+    ipcMain.handle('server:doChopper', async () => {
+        const { doChopper } = await import('./handlers/server.js');
+        return doChopper();
+    });
+    ipcMain.handle('server:doGunshot', async () => {
+        const { doGunshot } = await import('./handlers/server.js');
+        return doGunshot();
+    });
+    ipcMain.handle('server:broadcastMessage', async (_, message) => {
+        const { broadcastMessage } = await import('./handlers/server.js');
+        return broadcastMessage(message);
+    });
+
+    // Advanced Admin
+    ipcMain.handle('server:addXp', async (_, user, skill, amt) => {
+        const { addXp } = await import('./handlers/server.js');
+        return addXp(user, skill, amt);
+    });
+    ipcMain.handle('server:unbanUser', async (_, user) => {
+        const { unbanUser } = await import('./handlers/server.js');
+        return unbanUser(user);
+    });
+    ipcMain.handle('server:teleportToCoords', async (_, user, x, y, z) => {
+        const { teleportToCoords } = await import('./handlers/server.js');
+        return teleportToCoords(user, x, y, z);
+    });
+    ipcMain.handle('server:getBanList', async () => {
+        const { getBanList } = await import('./handlers/server.js');
+        return getBanList();
+    });
+
     ipcMain.handle('server:startBackupSchedule', (_, intervalMinutes) => {
         const win = BrowserWindow.getAllWindows()[0];
         return startBackupSchedule(intervalMinutes, (result) => {

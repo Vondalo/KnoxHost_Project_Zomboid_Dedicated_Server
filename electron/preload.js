@@ -21,6 +21,30 @@ contextBridge.exposeInMainWorld('electronAPI', {
     openServerFolder: () => ipcRenderer.invoke('server:openFolder'),
     backupSaves: () => ipcRenderer.invoke('server:backupSaves'),
     sendCommand: (command) => ipcRenderer.invoke('server:sendCommand', command),
+
+    // Admin & Player Management
+    getPlayers: () => ipcRenderer.invoke('server:getPlayers'),
+    kickPlayer: (username, reason) => ipcRenderer.invoke('server:kickPlayer', username, reason),
+    unbanPlayer: (username) => ipcRenderer.invoke('server:unbanPlayer', username),
+    messagePlayer: (username, message) => ipcRenderer.invoke('server:messagePlayer', username, message),
+    teleportPlayer: (username, target) => ipcRenderer.invoke('server:teleportPlayer', username, target),
+    setAccessLevel: (username, level) => ipcRenderer.invoke('server:setAccessLevel', username, level),
+    giveItem: (username, item, count) => ipcRenderer.invoke('server:giveItem', username, item, count),
+    addVehicle: (username, vehicle) => ipcRenderer.invoke('server:addVehicle', username, vehicle),
+    godMode: (username, enable) => ipcRenderer.invoke('server:godMode', username, enable),
+    invisible: (username, enable) => ipcRenderer.invoke('server:invisible', username, enable),
+    startRain: (intensity) => ipcRenderer.invoke('server:startRain', intensity),
+    stopRain: () => ipcRenderer.invoke('server:stopRain'),
+    doChopper: () => ipcRenderer.invoke('server:doChopper'),
+    doGunshot: () => ipcRenderer.invoke('server:doGunshot'),
+    broadcastMessage: (message) => ipcRenderer.invoke('server:broadcastMessage', message),
+
+    // Advanced Admin
+    addXp: (user, skill, amt) => ipcRenderer.invoke('server:addXp', user, skill, amt),
+    unbanUser: (user) => ipcRenderer.invoke('server:unbanUser', user),
+    teleportToCoords: (user, x, y, z) => ipcRenderer.invoke('server:teleportToCoords', user, x, y, z),
+    getBanList: () => ipcRenderer.invoke('server:getBanList'),
+
     startBackupSchedule: (interval) => ipcRenderer.invoke('server:startBackupSchedule', interval),
     stopBackupSchedule: () => ipcRenderer.invoke('server:stopBackupSchedule'),
     onBackupComplete: (callback) => {

@@ -216,19 +216,23 @@ export async function saveConfig(serverName, data) {
                 let content = '';
                 const spaces = ' '.repeat(indent);
                 for (const [key, value] of Object.entries(obj)) {
-                    if (key === 'SandboxVars' || key === '') continue; // Skip empty keys
+                    if (key === 'SandboxVars' || key === '') continue;
+                    if (value === undefined || value === null) continue; // Skip null/undefined
 
-                    // Check if key needs quoting (not a simple identifier)
+                    // Check if key needs quoting
                     const needsQuotes = !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key);
-                    const keyStr = needsQuotes ? `["${key}"]` : key;
+                    const keyStr = needsQuotes ? `["${key.replace(/"/g, '\\"')}"]` : key;
 
-                    if (typeof value === 'object' && value !== null) {
+                    if (typeof value === 'object') {
                         content += `${spaces}${keyStr} = {\n`;
                         content += serializeLua(value, indent + 4);
                         content += `${spaces}},\n`;
                     } else {
                         let valStr = value;
-                        if (typeof value === 'string') valStr = `"${value}"`;
+                        if (typeof value === 'string') {
+                            // Escape backslashes first, then double quotes
+                            valStr = `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+                        }
                         content += `${spaces}${keyStr} = ${valStr},\n`;
                     }
                 }

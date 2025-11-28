@@ -33,6 +33,7 @@ const Layout = () => {
 
                 <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
                     <NavItem to="/" icon={<LayoutDashboard size={20} />} label="Dashboard" isOpen={isSidebarOpen} />
+                    <NavItem to="/admin" icon={<Users size={20} />} label="Admin Panel" isOpen={isSidebarOpen} />
                     <NavItem to="/config" icon={<Settings size={20} />} label="Configuration" isOpen={isSidebarOpen} />
                     <NavItem to="/mods" icon={<Package size={20} />} label="Mods Manager" isOpen={isSidebarOpen} />
                     <NavItem to="/whitelist" icon={<Users size={20} />} label="Whitelist" isOpen={isSidebarOpen} />
