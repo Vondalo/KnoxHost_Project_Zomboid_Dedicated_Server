@@ -61,7 +61,7 @@ When hosting via standard methods, SteamCMD forces a full redownload and verific
 
 1.  Clone the repository:
     ```bash
-    git clone https://github.com/yourusername/KnoxHost.git
+    git clone https://github.com/Vondalo/KnoxHost_Project_Zomboid_Dedicated_Server.git
     ```
 2.  Install dependencies:
     ```bash
