@@ -1,4 +1,6 @@
-import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, Notification, protocol } from 'electron';
+import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, Notification, protocol, dialog } from 'electron';
+import electronUpdater from 'electron-updater';
+const { autoUpdater } = electronUpdater;
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { ensureSteamCMD, installServer } from './handlers/steamcmd.js';
@@ -283,6 +285,56 @@ app.whenReady().then(() => {
 
     ipcMain.handle('settings:get', getSettings);
     ipcMain.handle('settings:save', (_, settings) => saveSettings(settings));
+
+
+
+    // Auto-Updater Logic
+    autoUpdater.logger = console;
+    autoUpdater.autoDownload = false; // We will manually trigger download if needed, or let user decide. Actually, let's set to true for convenience or handle it.
+    // User asked for "automatically done when starting".
+    // Let's set autoDownload = true so it's seamless, but we can also provide feedback.
+    autoUpdater.autoDownload = true;
+
+    ipcMain.handle('updater:check', () => {
+        autoUpdater.checkForUpdates();
+    });
+
+    ipcMain.handle('updater:quitAndInstall', () => {
+        autoUpdater.quitAndInstall();
+    });
+
+    autoUpdater.on('checking-for-update', () => {
+        const win = BrowserWindow.getAllWindows()[0];
+        if (win) win.webContents.send('updater:status', 'Checking for updates...');
+    });
+
+    autoUpdater.on('update-available', (info) => {
+        const win = BrowserWindow.getAllWindows()[0];
+        if (win) win.webContents.send('updater:update-available', info);
+    });
+
+    autoUpdater.on('update-not-available', (info) => {
+        const win = BrowserWindow.getAllWindows()[0];
+        if (win) win.webContents.send('updater:update-not-available', info);
+    });
+
+    autoUpdater.on('error', (err) => {
+        const win = BrowserWindow.getAllWindows()[0];
+        if (win) win.webContents.send('updater:error', err.message);
+    });
+
+    autoUpdater.on('download-progress', (progressObj) => {
+        const win = BrowserWindow.getAllWindows()[0];
+        if (win) win.webContents.send('updater:download-progress', progressObj);
+    });
+
+    autoUpdater.on('update-downloaded', (info) => {
+        const win = BrowserWindow.getAllWindows()[0];
+        if (win) win.webContents.send('updater:update-downloaded', info);
+    });
+
+    // Check for updates on startup
+    autoUpdater.checkForUpdatesAndNotify();
 
 });
 

@@ -78,4 +78,38 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.on('sophie:progress', subscription);
         return () => ipcRenderer.removeListener('sophie:progress', subscription);
     },
+
+    // Auto-Updater
+    checkForUpdates: () => ipcRenderer.invoke('updater:check'),
+    quitAndInstall: () => ipcRenderer.invoke('updater:quitAndInstall'),
+    onUpdaterStatus: (callback) => {
+        const subscription = (_, data) => callback(data);
+        ipcRenderer.on('updater:status', subscription);
+        return () => ipcRenderer.removeListener('updater:status', subscription);
+    },
+    onUpdateAvailable: (callback) => {
+        const subscription = (_, data) => callback(data);
+        ipcRenderer.on('updater:update-available', subscription);
+        return () => ipcRenderer.removeListener('updater:update-available', subscription);
+    },
+    onUpdateNotAvailable: (callback) => {
+        const subscription = (_, data) => callback(data);
+        ipcRenderer.on('updater:update-not-available', subscription);
+        return () => ipcRenderer.removeListener('updater:update-not-available', subscription);
+    },
+    onDownloadProgress: (callback) => {
+        const subscription = (_, data) => callback(data);
+        ipcRenderer.on('updater:download-progress', subscription);
+        return () => ipcRenderer.removeListener('updater:download-progress', subscription);
+    },
+    onUpdateDownloaded: (callback) => {
+        const subscription = (_, data) => callback(data);
+        ipcRenderer.on('updater:update-downloaded', subscription);
+        return () => ipcRenderer.removeListener('updater:update-downloaded', subscription);
+    },
+    onUpdaterError: (callback) => {
+        const subscription = (_, data) => callback(data);
+        ipcRenderer.on('updater:error', subscription);
+        return () => ipcRenderer.removeListener('updater:error', subscription);
+    },
 });

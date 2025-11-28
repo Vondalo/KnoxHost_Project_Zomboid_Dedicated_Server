@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Outlet, NavLink, useLocation, useOutlet } from 'react-router-dom';
-import { LayoutDashboard, Settings, Package, Users, Menu } from 'lucide-react';
+import { LayoutDashboard, Settings, Package, Users, Menu, RefreshCw, ArrowUpCircle, Download } from 'lucide-react';
+import { useToast } from '../context/ToastContext';
 import { motion, AnimatePresence, useMotionValue, useTransform, animate } from 'framer-motion';
 import CustomCursor from './CustomCursor';
 
@@ -8,6 +9,63 @@ const Layout = () => {
     const location = useLocation();
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const currentOutlet = useOutlet();
+    const { addToast } = useToast();
+    const [updateStatus, setUpdateStatus] = useState('idle'); // idle, checking, available, downloading, downloaded
+    const [downloadProgress, setDownloadProgress] = useState(0);
+
+    useEffect(() => {
+        if (!window.electronAPI) return;
+
+        const cleanupStatus = window.electronAPI.onUpdaterStatus((msg) => {
+            console.log('Updater:', msg);
+        });
+
+        const cleanupAvailable = window.electronAPI.onUpdateAvailable((info) => {
+            setUpdateStatus('available');
+            addToast(`Update available: ${info.version}. Downloading...`, 'info');
+        });
+
+        const cleanupNotAvailable = window.electronAPI.onUpdateNotAvailable(() => {
+            if (updateStatus === 'checking') {
+                setUpdateStatus('idle');
+                addToast('You are on the latest version.', 'success');
+            }
+        });
+
+        const cleanupProgress = window.electronAPI.onDownloadProgress((progressObj) => {
+            setUpdateStatus('downloading');
+            setDownloadProgress(progressObj.percent);
+        });
+
+        const cleanupDownloaded = window.electronAPI.onUpdateDownloaded(() => {
+            setUpdateStatus('downloaded');
+            addToast('Update downloaded. Click to restart.', 'success');
+        });
+
+        const cleanupError = window.electronAPI.onUpdaterError((err) => {
+            setUpdateStatus('idle');
+            addToast(`Update error: ${err}`, 'error');
+        });
+
+        return () => {
+            cleanupStatus();
+            cleanupAvailable();
+            cleanupNotAvailable();
+            cleanupProgress();
+            cleanupDownloaded();
+            cleanupError();
+        };
+    }, [updateStatus, addToast]);
+
+    const handleCheckUpdate = () => {
+        setUpdateStatus('checking');
+        addToast('Checking for updates...', 'info');
+        window.electronAPI.checkForUpdates();
+    };
+
+    const handleRestart = () => {
+        window.electronAPI.quitAndInstall();
+    };
 
     return (
         <div className="flex h-screen bg-transparent text-text font-sans overflow-hidden selection:bg-primary/30 selection:text-white">
@@ -56,6 +114,35 @@ const Layout = () => {
                 <header className="h-12 bg-surface/30 backdrop-blur-md border-b border-border flex items-center justify-between px-4 shrink-0 drag-region">
                     <div className="text-xs text-text-muted font-mono uppercase tracking-wider">
                         {location.pathname === '/' ? 'Dashboard' : location.pathname.slice(1).replace('-', ' ')}
+
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                        {updateStatus === 'downloaded' ? (
+                            <button
+                                onClick={handleRestart}
+                                className="flex items-center gap-2 px-3 py-1.5 bg-green-500/10 text-green-500 hover:bg-green-500/20 rounded-md text-sm font-medium transition-colors border border-green-500/20"
+                            >
+                                <ArrowUpCircle size={16} />
+                                <span>Restart to Update</span>
+                            </button>
+                        ) : (
+                            <button
+                                onClick={handleCheckUpdate}
+                                disabled={updateStatus === 'checking' || updateStatus === 'downloading'}
+                                className={`flex items-center gap-2 px-3 py-1.5 bg-surface text-text-muted hover:text-text hover:bg-surface-hover rounded-md text-sm font-medium transition-colors border border-border ${(updateStatus === 'checking' || updateStatus === 'downloading') ? 'opacity-50 cursor-not-allowed' : ''
+                                    }`}
+                            >
+                                <RefreshCw size={16} className={updateStatus === 'checking' || updateStatus === 'downloading' ? 'animate-spin' : ''} />
+                                <span>
+                                    {updateStatus === 'downloading'
+                                        ? `Downloading ${Math.round(downloadProgress)}%`
+                                        : updateStatus === 'checking'
+                                            ? 'Checking...'
+                                            : 'Check Updates'}
+                                </span>
+                            </button>
+                        )}
                     </div>
                 </header>
 
