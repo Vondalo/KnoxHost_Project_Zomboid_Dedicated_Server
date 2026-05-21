@@ -8,6 +8,7 @@ import { readConfig, saveConfig } from './config.js';
 import { installWorkshopItem } from './steamcmd.js';
 import { getSettings } from './settings.js';
 import https from 'https';
+import { parseWorkshopHtml } from './workshopParser.js';
 
 const execPromise = util.promisify(exec);
 
@@ -154,6 +155,24 @@ async function getWorkshopItemsFromAcf(acfPath) {
         console.error(`Error reading ACF ${acfPath}:`, err);
         return [];
     }
+}
+
+async function getInstalledWorkshopIds() {
+    const installedIds = new Set();
+    const libraries = await getSteamLibraryFolders();
+    libraries.push(STEAMCMD_DIR);
+
+    for (const libPath of libraries) {
+        const acfPath = path.join(libPath, 'steamapps', 'workshop', `appworkshop_${PZ_APP_ID}.acf`);
+        if (!(await exists(acfPath))) {
+            continue;
+        }
+
+        const itemIds = await getWorkshopItemsFromAcf(acfPath);
+        itemIds.forEach((id) => installedIds.add(id));
+    }
+
+    return installedIds;
 }
 
 async function parseModFromPath(modPath, workshopId, source) {
@@ -330,52 +349,29 @@ export async function getInstalledMods() {
 }
 
 export async function searchSteamWorkshop(query) {
-    return new Promise((resolve, reject) => {
-        // If query is empty, fetch most popular (trend)
-        let url;
-        if (!query || query.trim() === '') {
-            url = `https://steamcommunity.com/workshop/browse/?appid=${PZ_APP_ID}&browsesort=trend&section=readytouseitems&actualsection=readytouseitems&p=1`;
-        } else {
-            url = `https://steamcommunity.com/workshop/browse/?appid=${PZ_APP_ID}&searchtext=${encodeURIComponent(query)}&childpublishedfileid=0&browsesort=textsearch&section=items`;
-        }
+    const searchText = query?.trim() || '';
+    const url = searchText
+        ? `https://steamcommunity.com/workshop/browse/?appid=${PZ_APP_ID}&searchtext=${encodeURIComponent(searchText)}&childpublishedfileid=0&browsesort=textsearch&section=items`
+        : `https://steamcommunity.com/workshop/browse/?appid=${PZ_APP_ID}&browsesort=trend&section=readytouseitems&actualsection=readytouseitems&p=1`;
 
+    const html = await new Promise((resolve, reject) => {
         https.get(url, (res) => {
             if (res.statusCode !== 200) {
-                res.resume(); // Consume response data to free up memory
+                res.resume();
                 reject(new Error(`Steam Workshop returned status code: ${res.statusCode}`));
                 return;
             }
 
             let data = '';
-            res.on('data', (chunk) => data += chunk);
-            res.on('end', () => {
-                const results = [];
-                try {
-                    const itemRegex = /<div class="workshopItem">([\s\S]*?)<\/div>/g;
-                    let match;
-
-                    while ((match = itemRegex.exec(data)) !== null) {
-                        const itemHtml = match[1];
-
-                        const linkMatch = itemHtml.match(/filedetails\/\?id=(\d+)/);
-                        const titleMatch = itemHtml.match(/<div class="workshopItemTitle ellipsis">(.+?)<\/div>/);
-                        const imgMatch = itemHtml.match(/<img class="workshopItemPreviewImage " src="(.+?)"/);
-
-                        if (linkMatch && titleMatch) {
-                            results.push({
-                                id: linkMatch[1],
-                                title: titleMatch[1],
-                                image: imgMatch ? imgMatch[1] : null
-                            });
-                        }
-                    }
-                    resolve(results);
-                } catch (err) {
-                    reject(new Error(`Failed to parse Steam Workshop data: ${err.message}`));
-                }
+            res.on('data', (chunk) => {
+                data += chunk;
             });
+            res.on('end', () => resolve(data));
         }).on('error', (err) => reject(new Error(`Network error searching Steam Workshop: ${err.message}`)));
     });
+
+    const installedIds = await getInstalledWorkshopIds();
+    return parseWorkshopHtml(html, installedIds).slice(0, 48);
 }
 
 export async function installMod(workshopId, onLog) {
@@ -458,8 +454,10 @@ export async function addModToServer(configName, workshopId, modIds) {
     config.WorkshopItems = currentWorkshopItems.join(';');
     config.Mods = currentMods.join(';');
 
-    await saveConfig(configName, { config, sandbox });
-    await saveConfig(configName, { config, sandbox });
+    const result = await saveConfig(configName, { config, sandbox });
+    if (!result.success) {
+        return { success: false, error: result.errors.join(' ') };
+    }
 
     if (mapsToAdd.length === 0) {
         // Check if the mod actually HAD maps but we couldn't find them (e.g. not downloaded)
@@ -521,8 +519,12 @@ export async function removeModFromServer(configName, workshopId, modIds) {
     config.WorkshopItems = currentWorkshopItems.join(';');
     config.Mods = currentMods.join(';');
 
-    await saveConfig(configName, { config, sandbox });
-    return true;
+    const result = await saveConfig(configName, { config, sandbox });
+    if (!result.success) {
+        return { success: false, error: result.errors.join(' ') };
+    }
+
+    return { success: true };
 }
 
 export async function copyModsFromClient(modIds, onLog) {
@@ -569,4 +571,162 @@ export async function copyModsFromClient(modIds, onLog) {
 
     if (onLog) onLog(`Finished copying. Copied ${copiedCount}/${modIds.length} mods.`);
     return { success: true, count: copiedCount };
+}
+
+export async function updateAcf(workshopIds) {
+    if (!workshopIds || workshopIds.length === 0) return;
+
+    const libraries = await getSteamLibraryFolders();
+    // Prioritize Client Steam path if available, otherwise check all
+    // We want to update the ACF that the GAME uses.
+    // If we are in "Co-op Mode", we are likely using the Client's install.
+    // If we are in "Dedicated Mode", we might be using SteamCMD (but usually Dedicated Server has its own ACF in steamapps/workshop)
+
+    // Let's try to find the main PZ install ACF.
+    let targetAcfPath = null;
+
+    for (const libPath of libraries) {
+        const checkPath = path.join(libPath, 'steamapps', 'workshop', `appworkshop_${PZ_APP_ID}.acf`);
+        if (await exists(checkPath)) {
+            targetAcfPath = checkPath;
+            break; // Found one, use it. (Usually main steam lib is first)
+        }
+    }
+
+    if (!targetAcfPath) {
+        console.warn('Could not find appworkshop_108600.acf to update.');
+        return;
+    }
+
+    try {
+        let content = await fs.readFile(targetAcfPath, 'utf-8');
+        const lines = content.split(/\r?\n/);
+        let newLines = [];
+        let inInstalledSection = false;
+        let depth = 0;
+        let existingIds = new Set();
+        let insertIndex = -1;
+
+        // First pass: find existing IDs and insertion point
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmed = line.trim();
+
+            if (trimmed.includes('"WorkshopItemsInstalled"')) {
+                inInstalledSection = true;
+            }
+
+            if (inInstalledSection) {
+                if (trimmed.startsWith('{')) {
+                    depth++;
+                } else if (trimmed.startsWith('}')) {
+                    depth--;
+                    if (depth === 0) {
+                        inInstalledSection = false;
+                        insertIndex = i; // Insert before the closing brace
+                    }
+                } else if (depth === 1) {
+                    const match = trimmed.match(/"(\d+)"/);
+                    if (match) {
+                        existingIds.add(match[1]);
+                    }
+                }
+            }
+        }
+
+        // Reconstruct content
+        if (insertIndex !== -1) {
+            // Add missing IDs
+            const idsToAdd = workshopIds.filter(id => !existingIds.has(id));
+
+            if (idsToAdd.length > 0) {
+                const insertionLines = idsToAdd.map(id => {
+                    // Minimal entry to satisfy "installed" check
+                    return `\t\t"${id}"\n\t\t{\n\t\t\t"manifest"\t"0"\n\t\t\t"size"\t"0"\n\t\t\t"timeupdated"\t"${Math.floor(Date.now() / 1000)}"\n\t\t}`;
+                });
+
+                lines.splice(insertIndex, 0, ...insertionLines);
+                await fs.writeFile(targetAcfPath, lines.join('\n'));
+                console.log(`Updated ACF with ${idsToAdd.length} new mods.`);
+            } else {
+                console.log('ACF already contains all mods.');
+            }
+        } else {
+            console.warn('Could not parse WorkshopItemsInstalled section in ACF.');
+        }
+
+    } catch (error) {
+        console.error('Error updating ACF:', error);
+    }
+}
+
+export async function installModsToClient(modIds, onProgress) {
+    if (!modIds || modIds.length === 0) return { success: true, count: 0 };
+
+    const libraries = await getSteamLibraryFolders();
+    // Find Client Workshop Path
+    // Find Client Workshop Path based on where PZ is installed (ACF location)
+    let clientWorkshopPath = null;
+
+    // First, find the library where PZ is installed
+    for (const libPath of libraries) {
+        const acfPath = path.join(libPath, 'steamapps', 'workshop', `appworkshop_${PZ_APP_ID}.acf`);
+        if (await exists(acfPath)) {
+            // Found the library where PZ is installed!
+            clientWorkshopPath = path.join(libPath, 'steamapps', 'workshop', 'content', PZ_APP_ID);
+            break;
+        }
+    }
+
+    if (!clientWorkshopPath) {
+        // Fallback: Try to find ANY workshop content folder if ACF is missing (unlikely if game is installed)
+        for (const libPath of libraries) {
+            const checkPath = path.join(libPath, 'steamapps', 'workshop', 'content', PZ_APP_ID);
+            // Check if 'workshop' folder exists at least
+            if (await exists(path.join(libPath, 'steamapps', 'workshop'))) {
+                clientWorkshopPath = checkPath;
+                break;
+            }
+        }
+    }
+
+    if (!clientWorkshopPath) {
+        clientWorkshopPath = path.join(DEFAULT_STEAM_PATH_X86, 'steamapps', 'workshop', 'content', PZ_APP_ID);
+    }
+
+    let installedCount = 0;
+    const total = modIds.length;
+
+    for (let i = 0; i < total; i++) {
+        const modId = modIds[i];
+        if (onProgress) onProgress({ status: `Installing mod ${i + 1}/${total}: ${modId}`, percent: Math.round(((i) / total) * 100) });
+
+        try {
+            // 1. Download via SteamCMD (always downloads to STEAMCMD_DIR)
+            await installWorkshopItem(PZ_APP_ID, modId, (msg) => {
+                // Optional: forward detailed steamcmd logs?
+            });
+
+            // 2. Copy to Client Workshop
+            const sourcePath = path.join(STEAMCMD_DIR, 'steamapps', 'workshop', 'content', PZ_APP_ID, modId);
+            const destPath = path.join(clientWorkshopPath, modId);
+
+            if (await exists(sourcePath)) {
+                await fs.mkdir(destPath, { recursive: true });
+                await fs.cp(sourcePath, destPath, { recursive: true, force: true });
+                installedCount++;
+            } else {
+                console.error(`Mod ${modId} failed to download via SteamCMD.`);
+            }
+
+        } catch (err) {
+            console.error(`Error installing mod ${modId}:`, err);
+        }
+    }
+
+    // 3. Update ACF
+    if (onProgress) onProgress({ status: 'Updating Steam ACF...', percent: 100 });
+    await updateAcf(modIds);
+
+    return { success: true, count: installedCount };
 }

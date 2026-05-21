@@ -42,10 +42,8 @@
 }
 
 @layer base {
-
-  body,
-  html,
-  * {
+  body.effects-enabled,
+  body.effects-enabled * {
     cursor: none !important;
   }
 

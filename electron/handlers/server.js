@@ -5,12 +5,15 @@ import fs from 'fs/promises';
 import { constants } from 'fs';
 
 import { readConfig } from './config.js';
+import { normalizeMemorySettings } from './memorySettings.js';
+import { createServerSessionStore, SERVER_SESSION_STATUSES } from './serverSessionStore.js';
 import { installServer, downloadMods } from './steamcmd.js';
 import { isValidServerName } from './validation.js';
 
 const SERVER_DIR = path.join(app.getPath('userData'), 'server');
+const ANSI_ESCAPE_PATTERN = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
 let serverProcess = null;
-let currentServerName = null; // Track the current server name for restarts
+const serverSession = createServerSessionStore();
 
 // Helper for async file existence check
 async function exists(filePath) {
@@ -23,21 +26,17 @@ async function exists(filePath) {
 }
 
 const serverState = {
-    isRunning: false,
-    logs: [],
-    players: []
+    parsingPlayers: false,
+    tempPlayers: []
 };
 
 // Helper to strip ANSI codes
 function stripAnsi(str) {
-    return str.replace(/\u001b\[[0-9;]*m/g, '');
+    return str.replace(ANSI_ESCAPE_PATTERN, '');
 }
 
 function addLog(message) {
-    serverState.logs.push(message);
-    if (serverState.logs.length > 1000) {
-        serverState.logs.shift();
-    }
+    serverSession.addLog(message);
 
     // Split message into lines to handle multi-line chunks
     const lines = message.split(/\r?\n/);
@@ -76,10 +75,10 @@ function addLog(message) {
 
             // If we found all expected players (e.g. 0 or 1 on same line), commit immediately
             if (serverState.tempPlayers.length >= expectedCount) {
-                serverState.players = [...serverState.tempPlayers];
+                serverSession.setPlayers(serverState.tempPlayers);
                 serverState.parsingPlayers = false;
                 serverState.tempPlayers = [];
-                console.log('[Debug] Player list updated (inline):', serverState.players);
+                console.log('[Debug] Player list updated (inline):', serverSession.getPlayers());
             }
         } else if (serverState.parsingPlayers) {
             if (trimmedLine.startsWith('-')) {
@@ -90,21 +89,29 @@ function addLog(message) {
                 }
             } else {
                 // End of list
-                serverState.players = [...serverState.tempPlayers];
+                serverSession.setPlayers(serverState.tempPlayers);
                 serverState.parsingPlayers = false;
                 serverState.tempPlayers = [];
-                console.log('[Debug] Player list updated (end of list):', serverState.players);
+                console.log('[Debug] Player list updated (end of list):', serverSession.getPlayers());
             }
         }
     }
 }
 
 export function getServerStatus() {
-    return serverState.isRunning;
+    return serverSession.isActive();
 }
 
 export function getServerLogs() {
-    return serverState.logs;
+    return serverSession.getLogs();
+}
+
+export function getServerSession() {
+    return serverSession.getSnapshot();
+}
+
+export function subscribeToServerSession(listener) {
+    return serverSession.subscribe(listener);
 }
 
 export async function isServerInstalled() {
@@ -122,7 +129,15 @@ export async function startServer(serverName, onData, skipModVerification = fals
         return false;
     }
 
-    currentServerName = serverName; // Update current server name
+    serverSession.patchSession({
+        serverName,
+        passwordNeeded: false,
+        status: SERVER_SESSION_STATUSES.STARTING
+    });
+
+    const startMsg = `Starting server '${serverName}'...`;
+    if (onData) onData(startMsg);
+    addLog(startMsg);
 
     // Windows batch file
     const batPath = path.join(SERVER_DIR, 'StartServer64.bat');
@@ -145,6 +160,10 @@ export async function startServer(serverName, onData, skipModVerification = fals
             const errMsg = `Error installing server: ${err.message}`;
             if (onData) onData(errMsg);
             addLog(errMsg);
+            serverSession.patchSession({
+                passwordNeeded: false,
+                status: SERVER_SESSION_STATUSES.STOPPED
+            });
             return false;
         }
     }
@@ -197,7 +216,7 @@ export async function startServer(serverName, onData, skipModVerification = fals
     // Patch memory settings
     try {
         const configData = await readConfig(serverName);
-        const memSettings = configData.metadata?.memory || { min: '4', max: '4' };
+        const memSettings = normalizeMemorySettings(configData.metadata?.memory);
 
         let content = await fs.readFile(batPath, 'utf8');
         // Match -Xms and -Xmx with any value (e.g. 16g, 8g, 2048m)
@@ -217,6 +236,12 @@ export async function startServer(serverName, onData, skipModVerification = fals
 
         await fs.writeFile(batPath, content);
 
+        if (memSettings.wasAdjusted) {
+            const adjustmentMsg = `Adjusted invalid memory settings from ${memSettings.requestedMin}GB / ${memSettings.requestedMax}GB to ${memSettings.min}GB / ${memSettings.max}GB.`;
+            if (onData) onData(adjustmentMsg);
+            addLog(adjustmentMsg);
+        }
+
         const memMsg = `Applied memory settings: ${memSettings.min}GB / ${memSettings.max}GB`;
         if (onData) onData(memMsg);
         addLog(memMsg);
@@ -225,8 +250,23 @@ export async function startServer(serverName, onData, skipModVerification = fals
         console.error('Failed to patch memory settings:', err);
     }
 
-    serverProcess = spawn(batPath, ['-servername', serverName], { cwd: SERVER_DIR, shell: true });
-    serverState.isRunning = true;
+    try {
+        serverProcess = spawn(batPath, ['-servername', serverName], { cwd: SERVER_DIR, shell: true });
+    } catch (err) {
+        const errMsg = `Error starting server: ${err.message}`;
+        if (onData) onData(errMsg);
+        addLog(errMsg);
+        serverSession.patchSession({
+            passwordNeeded: false,
+            status: SERVER_SESSION_STATUSES.STOPPED
+        });
+        return false;
+    }
+
+    serverSession.patchSession({
+        passwordNeeded: false,
+        status: SERVER_SESSION_STATUSES.RUNNING
+    });
 
     serverProcess.stdout.on('data', (data) => {
         const msg = data.toString();
@@ -235,6 +275,7 @@ export async function startServer(serverName, onData, skipModVerification = fals
 
         // Detect password prompt
         if (msg.includes('Enter new administrator password')) {
+            serverSession.setPasswordNeeded(true);
             if (onData) onData({ type: 'password-needed' });
         }
     });
@@ -246,13 +287,28 @@ export async function startServer(serverName, onData, skipModVerification = fals
 
         // Detect password prompt in stderr too, just in case
         if (msg.includes('Enter new administrator password')) {
+            serverSession.setPasswordNeeded(true);
             if (onData) onData({ type: 'password-needed' });
         }
     });
 
+    serverProcess.on('error', (error) => {
+        const errMsg = `Server process error: ${error.message}`;
+        if (onData) onData(errMsg);
+        addLog(errMsg);
+        serverProcess = null;
+        serverSession.patchSession({
+            passwordNeeded: false,
+            status: SERVER_SESSION_STATUSES.STOPPED
+        });
+    });
+
     serverProcess.on('close', () => {
         serverProcess = null;
-        serverState.isRunning = false;
+        serverSession.patchSession({
+            passwordNeeded: false,
+            status: SERVER_SESSION_STATUSES.STOPPED
+        });
         const stopMsg = 'Server stopped.';
         if (onData) onData(stopMsg);
         addLog(stopMsg);
@@ -277,9 +333,13 @@ export async function startServer(serverName, onData, skipModVerification = fals
 export async function stopServer() {
     if (serverProcess) {
         addLog('Stopping server...');
+        serverSession.patchSession({
+            passwordNeeded: false,
+            status: SERVER_SESSION_STATUSES.STOPPING
+        });
 
         // 1. Notify and Save
-        if (serverProcess && serverState.isRunning) {
+        if (serverProcess) {
             sendCommand('servermsg "Server is shutting down..."');
             sendCommand('save');
 
@@ -288,7 +348,6 @@ export async function stopServer() {
 
             // 2. Quit
             sendCommand('quit');
-            addLog('> quit');
         }
 
         // 3. Wait for graceful exit
@@ -462,14 +521,15 @@ export function startRestartSchedule(timeString) {
 
                 const checkServerStopped = setInterval(async () => {
                     attempts++;
-                    if (!serverProcess || !serverState.isRunning) {
+                    if (!serverProcess || !serverSession.isActive()) {
                         clearInterval(checkServerStopped);
                         addLog('Server stopped. Starting restart...');
 
-                        if (currentServerName) {
+                        const activeServerName = serverSession.getSnapshot().serverName;
+                        if (activeServerName) {
                             // Wait a brief moment to ensure file locks are released
                             setTimeout(async () => {
-                                await startServer(currentServerName, null, false);
+                                await startServer(activeServerName, null, false);
                             }, 2000);
                         } else {
                             addLog('Error: Could not restart, server name unknown.');
@@ -480,8 +540,9 @@ export function startRestartSchedule(timeString) {
                         stopServer(); // Attempt safe stop again
 
                         setTimeout(async () => {
-                            if (currentServerName) {
-                                await startServer(currentServerName, null, false);
+                            const activeServerName = serverSession.getSnapshot().serverName;
+                            if (activeServerName) {
+                                await startServer(activeServerName, null, false);
                             }
                         }, 2000);
                     }
@@ -510,8 +571,9 @@ export function getConnectedPlayers() {
     // Send command to refresh list
     sendCommand('players');
     // Return current state (will be updated async by log parser)
-    console.log('[Debug] getConnectedPlayers returning:', serverState.players);
-    return serverState.players || [];
+    const players = serverSession.getPlayers();
+    console.log('[Debug] getConnectedPlayers returning:', players);
+    return players;
 }
 
 export function kickPlayer(username, reason) {
@@ -604,9 +666,10 @@ export function teleportToCoords(username, x, y, z) {
 import Database from 'better-sqlite3';
 
 export async function getBanList() {
-    if (!currentServerName) return [];
+    const activeServerName = serverSession.getSnapshot().serverName;
+    if (!activeServerName) return [];
 
-    const dbPath = path.join(app.getPath('home'), 'Zomboid', 'db', `${currentServerName}.db`);
+    const dbPath = path.join(app.getPath('home'), 'Zomboid', 'db', `${activeServerName}.db`);
 
     if (!(await exists(dbPath))) return [];
 

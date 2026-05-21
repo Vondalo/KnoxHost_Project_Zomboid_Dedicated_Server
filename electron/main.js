@@ -1,12 +1,23 @@
-import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, Notification, protocol, dialog } from 'electron';
+/* global process */
+
+import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, Notification, protocol } from 'electron';
 import electronUpdater from 'electron-updater';
 const { autoUpdater } = electronUpdater;
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { ensureSteamCMD, installServer } from './handlers/steamcmd.js';
-import { getConfigs, readConfig, saveConfig, deleteConfig, openConfigFile, revealConfigFile, installSophiePreset } from './handlers/config.js';
-import { startServer, stopServer, getMemorySettings, setMemorySettings, getServerStatus, getServerLogs, openSavesFolder, backupSaves, startBackupSchedule, stopBackupSchedule, startRestartSchedule, stopRestartSchedule } from './handlers/server.js';
-import { getInstalledMods, addModToServer, removeModFromServer, searchSteamWorkshop, installMod, deleteMod, copyModsFromClient } from './handlers/mods.js';
+import { getConfigs, readConfig, saveConfig, deleteConfig, openConfigFile, revealConfigFile, installSophiePreset, openConfigDir } from './handlers/config.js';
+import { recordMainProcessError, recordRendererError, submitErrorReport } from './handlers/errorReporting.js';
+import { startServer, stopServer, getMemorySettings, setMemorySettings, getServerStatus, getServerLogs, getServerSession, subscribeToServerSession, openSavesFolder, backupSaves, startBackupSchedule, stopBackupSchedule, startRestartSchedule, stopRestartSchedule } from './handlers/server.js';
+import { getInstalledMods, addModToServer, removeModFromServer, searchSteamWorkshop, installMod, deleteMod, copyModsFromClient, installModsToClient } from './handlers/mods.js';
+
+// ... (rest of imports)
+
+// ... (inside createWindow or wherever IPC handlers are)
+
+// ... (rest of imports)
+
+// ... (inside createWindow or wherever IPC handlers are)
 import { getWhitelist, addToWhitelist, removeFromWhitelist } from './handlers/whitelist.js';
 import { getSettings, saveSettings } from './handlers/settings.js';
 
@@ -15,20 +26,46 @@ const __dirname = path.dirname(__filename);
 
 let tray = null;
 let isQuitting = false;
+let cleanupServerSessionSubscription = null;
 
 // Global Error Handling
 process.on('unhandledRejection', (reason, promise) => {
     console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+    recordMainProcessError('unhandledRejection', reason, {
+        promise: String(promise)
+    });
 });
 
 process.on('uncaughtException', (error) => {
     console.error('Uncaught Exception:', error);
+    recordMainProcessError('uncaughtException', error);
 });
 
 // Register scheme as privileged
 protocol.registerSchemesAsPrivileged([
     { scheme: 'media', privileges: { secure: true, supportFetchAPI: true, bypassCSP: true, standard: true } }
 ]);
+
+function sendToAllWindows(channel, payload) {
+    for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) {
+            win.webContents.send(channel, payload);
+        }
+    }
+}
+
+function formatServerStatusLabel(status) {
+    switch (status) {
+        case 'starting':
+            return 'Server: Starting';
+        case 'running':
+            return 'Server: Running';
+        case 'stopping':
+            return 'Server: Stopping';
+        default:
+            return 'Server: Stopped';
+    }
+}
 
 function createWindow() {
     const win = new BrowserWindow({
@@ -73,8 +110,8 @@ function createTray(win) {
     tray = new Tray(icon);
 
     const updateContextMenu = () => {
-        const isRunning = getServerStatus();
-        const statusText = isRunning ? 'Server: Running' : 'Server: Stopped';
+        const session = getServerSession();
+        const statusText = formatServerStatusLabel(session.status);
 
         const contextMenu = Menu.buildFromTemplate([
             { label: statusText, enabled: false },
@@ -111,20 +148,40 @@ function createTray(win) {
 app.whenReady().then(() => {
     createWindow();
 
+    if (!cleanupServerSessionSubscription) {
+        cleanupServerSessionSubscription = subscribeToServerSession((session) => {
+            sendToAllWindows('server:session', session);
+        });
+    }
+
     // IPC Handlers
     ipcMain.handle('steamcmd:ensure', ensureSteamCMD);
+    ipcMain.on('error:recordRenderer', (_, payload) => {
+        recordRendererError(payload);
+    });
+    ipcMain.handle('error:report', async (_, payload) => {
+        try {
+            recordRendererError(payload);
+            return await submitErrorReport(payload);
+        } catch (error) {
+            recordMainProcessError('reportSubmissionFailed', error, {
+                source: payload?.source || 'unknown'
+            });
+            throw error;
+        }
+    });
     ipcMain.handle('server:install', async () => {
-        const win = BrowserWindow.getAllWindows()[0];
         return await installServer((data) => {
-            win.webContents.send('server:output', data);
+            sendToAllWindows('server:output', data);
         });
     });
     ipcMain.handle('config:list', getConfigs);
     ipcMain.handle('config:read', (_, name) => readConfig(name));
     ipcMain.handle('config:save', (_, name, data) => saveConfig(name, data));
-    ipcMain.handle('config:delete', (_, name) => deleteConfig(name));
+    ipcMain.handle('config:delete', (_, name, deleteWorldData) => deleteConfig(name, deleteWorldData));
     ipcMain.handle('config:open', (_, name) => openConfigFile(name));
     ipcMain.handle('config:reveal', (_, name) => revealConfigFile(name));
+    ipcMain.handle('config:openDir', openConfigDir);
     ipcMain.handle('config:installSophie', async () => {
         const win = BrowserWindow.getAllWindows()[0];
         return await installSophiePreset((progress) => {
@@ -133,15 +190,15 @@ app.whenReady().then(() => {
     });
 
     ipcMain.handle('server:start', async (_, name, skipModVerification) => {
-        const win = BrowserWindow.getAllWindows()[0];
         return await startServer(name, (data) => {
-            win.webContents.send('server:output', data);
+            sendToAllWindows('server:output', data);
         }, skipModVerification);
     });
 
     ipcMain.handle('server:stop', stopServer);
     ipcMain.handle('server:getMemory', getMemorySettings);
     ipcMain.handle('server:setMemory', (_, min, max) => setMemorySettings(min, max));
+    ipcMain.handle('server:session', getServerSession);
     ipcMain.handle('server:status', getServerStatus);
     ipcMain.handle('server:logs', getServerLogs);
     ipcMain.handle('server:isInstalled', async () => {
@@ -270,13 +327,24 @@ app.whenReady().then(() => {
 
     ipcMain.handle('mods:list', getInstalledMods);
     ipcMain.handle('mods:search', (_, query) => searchSteamWorkshop(query));
-    ipcMain.handle('mods:install', (_, workshopId) => installMod(workshopId, (msg) => win.webContents.send('server:output', msg)));
+    ipcMain.handle('mods:install', (_, workshopId) => installMod(workshopId, (msg) => {
+        const win = BrowserWindow.getAllWindows()[0];
+        if (win) win.webContents.send('server:output', msg);
+    }));
     ipcMain.handle('mods:delete', (_, workshopId) => deleteMod(workshopId));
     ipcMain.handle('mods:add', (_, configName, workshopId, modIds) => addModToServer(configName, workshopId, modIds));
     ipcMain.handle('mods:remove', (_, configName, workshopId, modIds) => removeModFromServer(configName, workshopId, modIds));
     ipcMain.handle('mods:copyFromClient', async (_, modIds) => {
         const win = BrowserWindow.getAllWindows()[0];
-        return await copyModsFromClient(modIds, (msg) => win.webContents.send('server:output', msg));
+        return await copyModsFromClient(modIds, (msg) => {
+            if (win) win.webContents.send('server:output', `[ModCopy] ${msg}`);
+        });
+    });
+    ipcMain.handle('mods:installToClient', async (_, modIds) => {
+        const win = BrowserWindow.getAllWindows()[0];
+        return await installModsToClient(modIds, (progress) => {
+            if (win) win.webContents.send('sophie:progress', progress);
+        });
     });
 
     ipcMain.handle('whitelist:get', (_, serverName) => getWhitelist(serverName));
@@ -295,8 +363,21 @@ app.whenReady().then(() => {
     // Let's set autoDownload = true so it's seamless, but we can also provide feedback.
     autoUpdater.autoDownload = true;
 
-    ipcMain.handle('updater:check', () => {
-        autoUpdater.checkForUpdates();
+    ipcMain.handle('updater:check', async () => {
+        try {
+            const result = await autoUpdater.checkForUpdates();
+            // If result is null, it means the update check was skipped (e.g. in dev mode)
+            if (!result) {
+                const win = BrowserWindow.getAllWindows()[0];
+                if (win) {
+                    win.webContents.send('updater:update-not-available', { version: 'Dev Mode' });
+                    win.webContents.send('updater:status', 'Update check skipped (Dev Mode)');
+                }
+            }
+        } catch (err) {
+            const win = BrowserWindow.getAllWindows()[0];
+            if (win) win.webContents.send('updater:error', err.message);
+        }
     });
 
     ipcMain.handle('updater:quitAndInstall', () => {
@@ -354,5 +435,12 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') {
         app.quit();
+    }
+});
+
+app.on('before-quit', () => {
+    if (cleanupServerSessionSubscription) {
+        cleanupServerSessionSubscription();
+        cleanupServerSessionSubscription = null;
     }
 });

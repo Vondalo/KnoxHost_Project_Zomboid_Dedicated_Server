@@ -1,19 +1,23 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('electronAPI', {
+    recordRendererError: (payload) => ipcRenderer.send('error:recordRenderer', payload),
+    reportError: (payload) => ipcRenderer.invoke('error:report', payload),
     ensureSteamCMD: () => ipcRenderer.invoke('steamcmd:ensure'),
     installServer: () => ipcRenderer.invoke('server:install'),
     getConfigs: () => ipcRenderer.invoke('config:list'),
     readConfig: (name) => ipcRenderer.invoke('config:read', name),
     saveConfig: (name, data) => ipcRenderer.invoke('config:save', name, data),
-    deleteConfig: (name) => ipcRenderer.invoke('config:delete', name),
+    deleteConfig: (name, deleteWorldData = false) => ipcRenderer.invoke('config:delete', name, deleteWorldData),
     openConfigFile: (name) => ipcRenderer.invoke('config:open', name),
     revealConfigFile: (name) => ipcRenderer.invoke('config:reveal', name),
+    openConfigFolder: () => ipcRenderer.invoke('config:openDir'),
     installSophiePreset: () => ipcRenderer.invoke('config:installSophie'),
     startServer: (name, skipModVerification) => ipcRenderer.invoke('server:start', name, skipModVerification),
     stopServer: () => ipcRenderer.invoke('server:stop'),
     getMemory: () => ipcRenderer.invoke('server:getMemory'),
     setMemory: (min, max) => ipcRenderer.invoke('server:setMemory', min, max),
+    getServerSession: () => ipcRenderer.invoke('server:session'),
     getServerStatus: () => ipcRenderer.invoke('server:status'),
     isServerInstalled: () => ipcRenderer.invoke('server:isInstalled'),
     getServerLogs: () => ipcRenderer.invoke('server:logs'),
@@ -63,10 +67,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     addMod: (configName, workshopId, modIds) => ipcRenderer.invoke('mods:add', configName, workshopId, modIds),
     removeMod: (configName, workshopId, modIds) => ipcRenderer.invoke('mods:remove', configName, workshopId, modIds),
     copyModsFromClient: (modIds) => ipcRenderer.invoke('mods:copyFromClient', modIds),
+    installModsToClient: (modIds) => ipcRenderer.invoke('mods:installToClient', modIds),
     onServerOutput: (callback) => {
         const subscription = (_, data) => callback(data);
         ipcRenderer.on('server:output', subscription);
         return () => ipcRenderer.removeListener('server:output', subscription);
+    },
+    onServerSessionChanged: (callback) => {
+        const subscription = (_, session) => callback(session);
+        ipcRenderer.on('server:session', subscription);
+        return () => ipcRenderer.removeListener('server:session', subscription);
     },
     getWhitelist: (serverName) => ipcRenderer.invoke('whitelist:get', serverName),
     addToWhitelist: (serverName, username, password, isAdmin) => ipcRenderer.invoke('whitelist:add', serverName, username, password, isAdmin),

@@ -4,14 +4,37 @@ import { constants } from 'fs';
 import path from 'path';
 import ini from 'ini';
 import { app, shell } from 'electron';
+import { normalizeMemorySettings } from './memorySettings.js';
 import { getSettings } from './settings.js';
 import { isValidServerName } from './validation.js';
+import { updateAcf } from './mods.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const DEFAULT_METADATA = {
+    memory: {
+        min: '4',
+        max: '4'
+    }
+};
 
+function cloneDefaultMetadata() {
+    return JSON.parse(JSON.stringify(DEFAULT_METADATA));
+}
 
+function mergeMetadataDefaults(metadata = {}) {
+    const normalizedMemory = normalizeMemorySettings(metadata.memory || DEFAULT_METADATA.memory);
+
+    return {
+        ...cloneDefaultMetadata(),
+        ...metadata,
+        memory: {
+            min: normalizedMemory.min,
+            max: normalizedMemory.max
+        }
+    };
+}
 
 async function getConfigDir() {
     const settings = await getSettings();
@@ -58,7 +81,7 @@ export async function getConfigs() {
 export async function readConfig(serverName) {
     if (!isValidServerName(serverName)) {
         console.error(`Invalid server name: ${serverName}`);
-        return { config: {}, sandbox: {}, spawnregions: '', zombies: {}, metadata: { memory: { min: '4', max: '4' } } };
+        return { config: {}, sandbox: {}, spawnregions: '', zombies: {}, metadata: cloneDefaultMetadata() };
     }
 
     const CONFIG_DIR = await getConfigDir();
@@ -70,7 +93,7 @@ export async function readConfig(serverName) {
     let sandbox = {};
     let spawnregions = '';
     let zombies = {};
-    let metadata = { memory: { min: '4', max: '4' } }; // Default metadata
+    let metadata = cloneDefaultMetadata();
 
     // Read Metadata (JSON)
     const jsonPath = path.join(CONFIG_DIR, `${serverName}.json`);
@@ -78,7 +101,7 @@ export async function readConfig(serverName) {
         try {
             const jsonContent = await fs.readFile(jsonPath, 'utf-8');
             const parsed = JSON.parse(jsonContent);
-            metadata = { ...metadata, ...parsed };
+            metadata = mergeMetadataDefaults(parsed);
         } catch (error) {
             console.error(`Error reading JSON metadata ${jsonPath}:`, error);
         }
@@ -198,6 +221,7 @@ export async function saveConfig(serverName, data) {
     const spawnPath = path.join(CONFIG_DIR, `${serverName}_spawnregions.lua`);
     const zombiesPath = path.join(CONFIG_DIR, `${serverName}_zombies.ini`);
     const jsonPath = path.join(CONFIG_DIR, `${serverName}.json`);
+    const errors = [];
 
     if (data.config) {
         try {
@@ -207,6 +231,7 @@ export async function saveConfig(serverName, data) {
             await fs.writeFile(iniPath, iniContent);
         } catch (error) {
             console.error(`Error writing INI file ${iniPath}:`, error);
+            errors.push(`Failed to write ${path.basename(iniPath)}: ${error.message}`);
         }
     }
 
@@ -245,6 +270,7 @@ export async function saveConfig(serverName, data) {
             await fs.writeFile(luaPath, luaContent);
         } catch (error) {
             console.error(`Error writing Lua file ${luaPath}:`, error);
+            errors.push(`Failed to write ${path.basename(luaPath)}: ${error.message}`);
         }
     }
 
@@ -253,6 +279,7 @@ export async function saveConfig(serverName, data) {
             await fs.writeFile(spawnPath, data.spawnregions);
         } catch (error) {
             console.error(`Error writing SpawnRegions file ${spawnPath}:`, error);
+            errors.push(`Failed to write ${path.basename(spawnPath)}: ${error.message}`);
         }
     }
 
@@ -262,16 +289,24 @@ export async function saveConfig(serverName, data) {
             await fs.writeFile(zombiesPath, zombiesContent);
         } catch (error) {
             console.error(`Error writing Zombies INI ${zombiesPath}:`, error);
+            errors.push(`Failed to write ${path.basename(zombiesPath)}: ${error.message}`);
         }
     }
 
     if (data.metadata) {
         try {
-            await fs.writeFile(jsonPath, JSON.stringify(data.metadata, null, 2));
+            const nextMetadata = mergeMetadataDefaults(data.metadata);
+            await fs.writeFile(jsonPath, JSON.stringify(nextMetadata, null, 2));
         } catch (error) {
             console.error(`Error writing Metadata JSON ${jsonPath}:`, error);
+            errors.push(`Failed to write ${path.basename(jsonPath)}: ${error.message}`);
         }
     }
+
+    return {
+        success: errors.length === 0,
+        errors
+    };
 }
 
 export async function deleteConfig(serverName, deleteWorld = false) {
@@ -295,7 +330,6 @@ export async function deleteConfig(serverName, deleteWorld = false) {
 
         if (deleteWorld) {
             const savesDir = path.join(await getSavesDir(), serverName);
-            const dbPath = path.join(await getDbDir(), `${serverName}.db`); // Note: DB location might vary, usually in db folder or saves
 
             // Standard PZ Save Location: ~/Zomboid/Saves/Multiplayer/<ServerName>
             if (await exists(savesDir)) {
@@ -341,13 +375,23 @@ export async function revealConfigFile(serverName) {
     return false;
 }
 
+export async function openConfigDir() {
+    const CONFIG_DIR = await getConfigDir();
+    if (await exists(CONFIG_DIR)) {
+        await shell.openPath(CONFIG_DIR);
+        return true;
+    }
+    return false;
+}
+
 export async function installSophiePreset(onProgress) {
     const settings = await getSettings();
     const destBase = settings.pzConfigPath || path.join(app.getPath('home'), 'Zomboid');
     const tempDir = app.getPath('temp');
     const zipPath = path.join(tempDir, 'sophie_preset.zip');
     const extractPath = path.join(tempDir, 'sophie_extracted');
-    const downloadUrl = 'https://drive.google.com/uc?export=download&id=1SKnAm9rEjzcypx4jqb85YmmZlpyU0nkb';
+    // Direct link to the zip inside the repo
+    const downloadUrl = 'https://github.com/GerDeathstar/sophie-pz/raw/main/Sophie%20v1.14%20Main%20Preset%20Files.zip';
 
     try {
         if (onProgress) onProgress({ status: 'Downloading...', percent: 0 });
@@ -363,9 +407,13 @@ export async function installSophiePreset(onProgress) {
         // Node 18+ fetch body is a ReadableStream
         const reader = response.body.getReader();
 
-        while (true) {
+        let isReading = true;
+        while (isReading) {
             const { done, value } = await reader.read();
-            if (done) break;
+            if (done) {
+                isReading = false;
+                continue;
+            }
 
             await fileStream.write(value);
             downloadedBytes += value.length;
@@ -379,8 +427,7 @@ export async function installSophiePreset(onProgress) {
 
         if (onProgress) onProgress({ status: 'Extracting...', percent: 100 });
 
-        // 2. Unzip using PowerShell (Windows only, but app is for Windows)
-        // Clean previous extraction if exists
+        // 2. Unzip using PowerShell
         if (await exists(extractPath)) {
             await fs.rm(extractPath, { recursive: true, force: true });
         }
@@ -402,41 +449,52 @@ export async function installSophiePreset(onProgress) {
         if (onProgress) onProgress({ status: 'Installing...', percent: 100 });
 
         // 3. Move Files
-        // The zip structure is likely: Sophie Files/{Server, Lua, Sandbox Presets} or just {Server, Lua, ...}
-        // Let's check what's inside extractPath
         const extractedFiles = await fs.readdir(extractPath);
         let sourceRoot = extractPath;
 
-        // If there's a single folder inside, go into it (common with zips)
+        // If there's a single folder inside, go into it
         if (extractedFiles.length === 1 && (await fs.stat(path.join(extractPath, extractedFiles[0]))).isDirectory()) {
             sourceRoot = path.join(extractPath, extractedFiles[0]);
         }
 
-        // Ensure destination directories exist
-        await fs.mkdir(path.join(destBase, 'Server'), { recursive: true });
-        await fs.mkdir(path.join(destBase, 'Lua'), { recursive: true });
-        await fs.mkdir(path.join(destBase, 'Sandbox Presets'), { recursive: true });
+        // Get list of files to be installed (relative paths)
+        const getRelativeFiles = async (dir, baseDir) => {
+            let results = [];
+            const list = await fs.readdir(dir, { withFileTypes: true });
+            for (const file of list) {
+                const fullPath = path.join(dir, file.name);
+                if (file.isDirectory()) {
+                    results = results.concat(await getRelativeFiles(fullPath, baseDir));
+                } else {
+                    results.push(path.relative(baseDir, fullPath));
+                }
+            }
+            return results;
+        };
 
-        // Copy Server folder
-        if (await exists(path.join(sourceRoot, 'Server'))) {
-            await fs.cp(path.join(sourceRoot, 'Server'), path.join(destBase, 'Server'), { recursive: true, force: true });
-        }
+        const installedFiles = await getRelativeFiles(sourceRoot, sourceRoot);
 
-        // Copy Lua folder
-        if (await exists(path.join(sourceRoot, 'Lua'))) {
-            await fs.cp(path.join(sourceRoot, 'Lua'), path.join(destBase, 'Lua'), { recursive: true, force: true });
-        }
+        // Move files to destination
+        await fs.cp(sourceRoot, destBase, { recursive: true, force: true });
 
-        // Copy Sandbox Presets folder
-        if (await exists(path.join(sourceRoot, 'Sandbox Presets'))) {
-            await fs.cp(path.join(sourceRoot, 'Sandbox Presets'), path.join(destBase, 'Sandbox Presets'), { recursive: true, force: true });
-        }
-
-        // Cleanup
+        // 4. Cleanup
         await fs.unlink(zipPath);
         await fs.rm(extractPath, { recursive: true, force: true });
 
-        return { success: true, message: 'Sophie Modpack installed successfully.' };
+        // 5. Update ACF & Return Mod IDs
+        if (onProgress) onProgress({ status: 'Updating Steam ACF...', percent: 100 });
+
+        let modIds = [];
+        // Try to read 'Sophie' config to get mods
+        const { config } = await readConfig('Sophie');
+        if (config && config.WorkshopItems) {
+            modIds = config.WorkshopItems.split(';').map(id => id.trim()).filter(id => id);
+            if (modIds.length > 0) {
+                await updateAcf(modIds);
+            }
+        }
+
+        return { success: true, message: 'Sophie Modpack installed successfully.', modIds, installedFiles };
     } catch (error) {
         console.error('Error installing Sophie Preset:', error);
         return { success: false, error: error.message };

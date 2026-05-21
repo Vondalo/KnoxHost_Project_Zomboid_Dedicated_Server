@@ -1,20 +1,60 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Outlet, NavLink, useLocation, useOutlet } from 'react-router-dom';
-import { LayoutDashboard, Settings, Package, Users, Menu, RefreshCw, ArrowUpCircle, Download } from 'lucide-react';
+import { LayoutDashboard, Settings, Package, Users, Menu, RefreshCw, ArrowUpCircle } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { motion, AnimatePresence, useMotionValue, useTransform, animate } from 'framer-motion';
 import CustomCursor from './CustomCursor';
+import { subscribeToSettingsChanged } from '../lib/appSettings';
+
+const DEFAULT_APP_SETTINGS = {
+    enableDedicatedServer: false,
+    uiEffectsEnabled: true
+};
 
 const Layout = () => {
     const location = useLocation();
-    const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const currentOutlet = useOutlet();
-    const { addToast } = useToast();
-    const [updateStatus, setUpdateStatus] = useState('idle'); // idle, checking, available, downloading, downloaded
+    const toast = useToast();
+    const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+    const [updateStatus, setUpdateStatus] = useState('idle');
     const [downloadProgress, setDownloadProgress] = useState(0);
+    const [appSettings, setAppSettings] = useState(DEFAULT_APP_SETTINGS);
 
     useEffect(() => {
-        if (!window.electronAPI) return;
+        if (!window.electronAPI) {
+            return;
+        }
+
+        let isMounted = true;
+        window.electronAPI.getSettings().then((settings) => {
+            if (isMounted) {
+                setAppSettings((prev) => ({ ...prev, ...settings }));
+            }
+        });
+
+        const unsubscribe = subscribeToSettingsChanged((settings) => {
+            setAppSettings((prev) => ({ ...prev, ...settings }));
+        });
+
+        return () => {
+            isMounted = false;
+            unsubscribe();
+        };
+    }, []);
+
+    useEffect(() => {
+        const effectsEnabled = appSettings.uiEffectsEnabled !== false;
+        document.body.classList.toggle('effects-enabled', effectsEnabled);
+
+        return () => {
+            document.body.classList.remove('effects-enabled');
+        };
+    }, [appSettings.uiEffectsEnabled]);
+
+    useEffect(() => {
+        if (!window.electronAPI) {
+            return;
+        }
 
         const cleanupStatus = window.electronAPI.onUpdaterStatus((msg) => {
             console.log('Updater:', msg);
@@ -22,14 +62,12 @@ const Layout = () => {
 
         const cleanupAvailable = window.electronAPI.onUpdateAvailable((info) => {
             setUpdateStatus('available');
-            addToast(`Update available: ${info.version}. Downloading...`, 'info');
+            toast.info(`Update available: ${info.version}. Downloading...`);
         });
 
         const cleanupNotAvailable = window.electronAPI.onUpdateNotAvailable(() => {
-            if (updateStatus === 'checking') {
-                setUpdateStatus('idle');
-                addToast('You are on the latest version.', 'success');
-            }
+            setUpdateStatus('idle');
+            toast.success('You are on the latest version.');
         });
 
         const cleanupProgress = window.electronAPI.onDownloadProgress((progressObj) => {
@@ -39,12 +77,12 @@ const Layout = () => {
 
         const cleanupDownloaded = window.electronAPI.onUpdateDownloaded(() => {
             setUpdateStatus('downloaded');
-            addToast('Update downloaded. Click to restart.', 'success');
+            toast.success('Update downloaded. Click to restart.');
         });
 
         const cleanupError = window.electronAPI.onUpdaterError((err) => {
             setUpdateStatus('idle');
-            addToast(`Update error: ${err}`, 'error');
+            toast.error(`Update error: ${err}`);
         });
 
         return () => {
@@ -55,11 +93,11 @@ const Layout = () => {
             cleanupDownloaded();
             cleanupError();
         };
-    }, [updateStatus, addToast]);
+    }, [toast]);
 
     const handleCheckUpdate = () => {
         setUpdateStatus('checking');
-        addToast('Checking for updates...', 'info');
+        toast.info('Checking for updates...');
         window.electronAPI.checkForUpdates();
     };
 
@@ -67,12 +105,14 @@ const Layout = () => {
         window.electronAPI.quitAndInstall();
     };
 
+    const isDedicatedMode = appSettings.enableDedicatedServer || false;
+    const uiEffectsEnabled = appSettings.uiEffectsEnabled !== false;
+
     return (
         <div className="flex h-screen bg-transparent text-text font-sans overflow-hidden selection:bg-primary/30 selection:text-white">
-            <CustomCursor />
-            <InteractiveBackground />
+            {uiEffectsEnabled && <CustomCursor />}
+            {uiEffectsEnabled && <InteractiveBackground />}
 
-            {/* Sidebar */}
             <motion.aside
                 initial={{ x: -20, opacity: 0 }}
                 animate={{ x: 0, opacity: 1 }}
@@ -91,10 +131,10 @@ const Layout = () => {
 
                 <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
                     <NavItem to="/" icon={<LayoutDashboard size={20} />} label="Dashboard" isOpen={isSidebarOpen} />
-                    <NavItem to="/admin" icon={<Users size={20} />} label="Admin Panel" isOpen={isSidebarOpen} />
+                    {isDedicatedMode && <NavItem to="/admin" icon={<Users size={20} />} label="Admin Panel" isOpen={isSidebarOpen} />}
                     <NavItem to="/config" icon={<Settings size={20} />} label="Configuration" isOpen={isSidebarOpen} />
                     <NavItem to="/mods" icon={<Package size={20} />} label="Mods Manager" isOpen={isSidebarOpen} />
-                    <NavItem to="/whitelist" icon={<Users size={20} />} label="Whitelist" isOpen={isSidebarOpen} />
+                    {isDedicatedMode && <NavItem to="/whitelist" icon={<Users size={20} />} label="Whitelist" isOpen={isSidebarOpen} />}
                     <NavItem to="/settings" icon={<Settings size={20} />} label="Settings" isOpen={isSidebarOpen} />
                 </nav>
 
@@ -108,13 +148,10 @@ const Layout = () => {
                 </div>
             </motion.aside>
 
-            {/* Main Content */}
             <div className="flex-1 flex flex-col min-w-0 bg-transparent relative z-10">
-                {/* Title Bar */}
                 <header className="h-12 bg-surface/30 backdrop-blur-md border-b border-border flex items-center justify-between px-4 shrink-0 drag-region">
                     <div className="text-xs text-text-muted font-mono uppercase tracking-wider">
                         {location.pathname === '/' ? 'Dashboard' : location.pathname.slice(1).replace('-', ' ')}
-
                     </div>
 
                     <div className="flex items-center gap-2">
@@ -130,8 +167,7 @@ const Layout = () => {
                             <button
                                 onClick={handleCheckUpdate}
                                 disabled={updateStatus === 'checking' || updateStatus === 'downloading'}
-                                className={`flex items-center gap-2 px-3 py-1.5 bg-surface text-text-muted hover:text-text hover:bg-surface-hover rounded-md text-sm font-medium transition-colors border border-border ${(updateStatus === 'checking' || updateStatus === 'downloading') ? 'opacity-50 cursor-not-allowed' : ''
-                                    }`}
+                                className={`flex items-center gap-2 px-3 py-1.5 bg-surface text-text-muted hover:text-text hover:bg-surface-hover rounded-md text-sm font-medium transition-colors border border-border ${(updateStatus === 'checking' || updateStatus === 'downloading') ? 'opacity-50 cursor-not-allowed' : ''}`}
                             >
                                 <RefreshCw size={16} className={updateStatus === 'checking' || updateStatus === 'downloading' ? 'animate-spin' : ''} />
                                 <span>
@@ -146,7 +182,6 @@ const Layout = () => {
                     </div>
                 </header>
 
-                {/* Page Content */}
                 <main className="flex-1 overflow-auto p-6 relative">
                     <AnimatePresence mode="wait">
                         <motion.div
@@ -154,7 +189,7 @@ const Layout = () => {
                             initial={{ opacity: 0, y: 10, scale: 0.98 }}
                             animate={{ opacity: 1, y: 0, scale: 1 }}
                             exit={{ opacity: 0, y: -10, scale: 0.98 }}
-                            transition={{ duration: 0.2, ease: "easeOut" }}
+                            transition={{ duration: 0.2, ease: 'easeOut' }}
                             className="h-full"
                         >
                             {currentOutlet}
@@ -192,90 +227,102 @@ const NavItem = ({ to, icon, label, isOpen }) => (
 const InteractiveBackground = () => {
     const mouseX = useMotionValue(0);
     const mouseY = useMotionValue(0);
+    const [particles] = useState(() => (
+        Array.from({ length: 18 }, () => ({
+            x: Math.random(),
+            y: Math.random(),
+            drift: Math.random()
+        }))
+    ));
 
     useEffect(() => {
         const handleMouseMove = (e) => {
             mouseX.set(e.clientX);
             mouseY.set(e.clientY);
         };
+
         window.addEventListener('mousemove', handleMouseMove);
         return () => window.removeEventListener('mousemove', handleMouseMove);
     }, [mouseX, mouseY]);
 
     return (
         <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden bg-background">
-            {/* Grid Pattern */}
             <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.05)_1px,transparent_1px)] bg-[size:40px_40px] [mask-image:radial-gradient(ellipse_at_center,black_60%,transparent_100%)]" />
-
-            {/* Floating Spores/Dust with Repulsion */}
-            {[...Array(40)].map((_, i) => (
-                <Particle key={i} mouseX={mouseX} mouseY={mouseY} />
+            {particles.map((seed, index) => (
+                <Particle key={index} mouseX={mouseX} mouseY={mouseY} seed={seed} />
             ))}
         </div>
     );
 };
 
-const Particle = ({ mouseX, mouseY }) => {
-    const initialX = Math.random() * window.innerWidth;
-    const initialY = Math.random() * window.innerHeight;
-
-    // Create motion values for the particle's base animation position
+const Particle = ({ mouseX, mouseY, seed }) => {
+    const viewportWidth = typeof window === 'undefined' ? 1200 : window.innerWidth;
+    const viewportHeight = typeof window === 'undefined' ? 800 : window.innerHeight;
+    const initialX = seed.x * viewportWidth;
+    const initialY = seed.y * viewportHeight;
     const baseX = useMotionValue(initialX);
     const baseY = useMotionValue(initialY);
 
-    // Animate base position randomly
     useEffect(() => {
-        const controls = animate(baseX, [initialX - 50, initialX + 50], {
-            duration: Math.random() * 10 + 10,
+        const offset = 25 + seed.drift * 35;
+        const duration = 12 + seed.drift * 8;
+        const controlsX = animate(baseX, [initialX - offset, initialX + offset], {
+            duration,
             repeat: Infinity,
-            repeatType: "reverse",
-            ease: "easeInOut"
+            repeatType: 'reverse',
+            ease: 'easeInOut'
         });
-        const controlsY = animate(baseY, [initialY - 50, initialY + 50], {
-            duration: Math.random() * 10 + 10,
+        const controlsY = animate(baseY, [initialY - offset, initialY + offset], {
+            duration: duration + 2,
             repeat: Infinity,
-            repeatType: "reverse",
-            ease: "easeInOut"
+            repeatType: 'reverse',
+            ease: 'easeInOut'
         });
-        return () => { controls.stop(); controlsY.stop(); };
-    }, [baseX, baseY, initialX, initialY]);
 
-    // Calculate repulsion
+        return () => {
+            controlsX.stop();
+            controlsY.stop();
+        };
+    }, [baseX, baseY, initialX, initialY, seed.drift]);
+
     const x = useTransform([baseX, mouseX, mouseY], ([bx, mx, my]) => {
         const dx = bx - mx;
         const dy = baseY.get() - my;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        const maxDist = 200;
+        const distance = Math.sqrt(dx * dx + dy * dy) || 1;
+        const maxDist = 180;
+
         if (distance < maxDist) {
             const force = (maxDist - distance) / maxDist;
-            return bx + (dx / distance) * force * 50; // Push away by up to 50px
+            return bx + (dx / distance) * force * 30;
         }
+
         return bx;
     });
 
     const y = useTransform([baseY, mouseX, mouseY], ([by, mx, my]) => {
         const dx = baseX.get() - mx;
         const dy = by - my;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        const maxDist = 200;
+        const distance = Math.sqrt(dx * dx + dy * dy) || 1;
+        const maxDist = 180;
+
         if (distance < maxDist) {
             const force = (maxDist - distance) / maxDist;
-            return by + (dy / distance) * force * 50;
+            return by + (dy / distance) * force * 30;
         }
+
         return by;
     });
 
     return (
         <motion.div
-            className="absolute w-1 h-1 bg-primary/40 rounded-full blur-[1px]"
+            className="absolute w-1 h-1 bg-primary/30 rounded-full blur-[1px]"
             style={{ x, y }}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: [0.2, 0.5, 0.2] }}
+            animate={{ opacity: [0.15, 0.35, 0.15] }}
             transition={{
-                duration: Math.random() * 5 + 5,
+                duration: 6 + seed.drift * 4,
                 repeat: Infinity,
-                repeatType: "reverse",
-                ease: "easeInOut"
+                repeatType: 'reverse',
+                ease: 'easeInOut'
             }}
         />
     );
